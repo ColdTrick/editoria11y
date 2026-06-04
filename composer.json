@@ -1,0 +1,15 @@
+{
+	"name": "coldtrick/editoria11y",
+	"description": "Editoria11y implementation for Elgg",
+	"homepage": "https://www.coldtrick.com",
+	"type": "elgg-plugin",
+	"keywords": ["elgg", "plugin", "a11y"],
+	"license": "GPL-2.0-only",
+	"support": {
+		"source": "https://github.com/ColdTrick/editoria11y",
+		"issues": "https://github.com/ColdTrick/editoria11y/issues"
+	},
+	"conflict": {
+		"elgg/elgg": "<7.0"
+	}
+}
