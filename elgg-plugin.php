@@ -12,4 +12,15 @@ return [
 			'ckeditor' => [],
 		],
 	],
+	'view_extensions' => [
+		'ckeditor/init' => [
+			'editoria11y/init' => [],
+		],
+	],
+	'views' => [
+		'default' => [
+			'editoria11y/css/' => __DIR__ . '/vendors/itmaybejj/editoria11y/dist/css/',
+			'editoria11y/js/' => __DIR__ . '/vendors/itmaybejj/editoria11y/dist/js/',
+		],
+	],
 ];
