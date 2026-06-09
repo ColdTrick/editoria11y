@@ -12,15 +12,22 @@ return [
 			'ckeditor' => [],
 		],
 	],
-	'view_extensions' => [
-		'ckeditor/init' => [
-			'editoria11y/init' => [],
+	'events' => [
+		'view_vars' => [
+			'elements/forms/field' => [
+				'\ColdTrick\Editoria11y\Views::detectEditor' => [],
+			],
 		],
 	],
 	'views' => [
 		'default' => [
 			'editoria11y/css/' => __DIR__ . '/vendors/itmaybejj/editoria11y/dist/css/',
 			'editoria11y/js/' => __DIR__ . '/vendors/itmaybejj/editoria11y/dist/js/',
+		],
+	],
+	'view_options' => [
+		'editoria11y/init.mjs' => [
+			'simplecache' => true,
 		],
 	],
 ];
