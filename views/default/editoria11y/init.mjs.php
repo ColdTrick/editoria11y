@@ -7,6 +7,7 @@ foreach ($translator->getAllowedLanguages() as $code) {
 		$supported_languages .= "'{$code}',";
 	}
 }
+
 $supported_languages .= ']';
 
 ?>
