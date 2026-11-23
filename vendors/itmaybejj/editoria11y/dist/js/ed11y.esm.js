@@ -1,6 +1,6 @@
 /*!
 			* Editoria11y accessibility checker
-			* @version 3.0.0-421
+			* @version 3.0.4-1122
 			* @author John Jameson
 			* @license GPLv2
 			* @copyright © 2026 Princeton University.
@@ -8,7 +8,7 @@
 		**/
     /*!
       * Sa11y, the accessibility quality assurance assistant.
-      * @version 4.4.2
+      * @version dev-5.1.1
       * @author Adam Chaboryk
       * @license GPL-2.0-or-later
       * @copyright © 2020 - 2026 Toronto Metropolitan University.
@@ -45,6 +45,17 @@ const Lang = {
   },
   translate(string) {
     return this.langStrings[string] || string;
+  },
+  /**
+   * Returns a word list (e.g. 'CLICK', 'LINK_STOPWORDS') from the language file. For a missing or
+   * malformed entry it returns an empty array, so a custom or outdated language object disables
+   * that matching instead of crashing: translate() would return the key itself, a string.
+   * @param {string} key - The language file key of an array of strings.
+   * @returns {string[]} The list, without non-string entries.
+   */
+  list(key) {
+    const value = this.langStrings[key];
+    return Array.isArray(value) ? value.filter((entry) => typeof entry === "string") : [];
   },
   prepHTML($el) {
     return $el.replaceAll(/<hr>/g, '<hr aria-hidden="true">').replaceAll(/<a[\s]href=/g, '<a target="_blank" rel="noopener noreferrer" href=').replaceAll(/<\/a>/g, `<span class="visually-hidden"> (${Lang._("NEW_TAB")})</span></a>`).replaceAll(/{C}/g, 'class="colour"').replaceAll(/{B}/g, 'class="badge"').replaceAll(/{ALT}/g, `<strong class="badge">${Lang._("ALT")}</strong>`).replaceAll(
@@ -136,6 +147,7 @@ const defaultOptions = {
   // e.g. '.inner-node-hidden-in-CSS'
   // Shared properties for some checks
   altPlaceholder: [],
+  // Strings (prefix match) and/or RegExp objects (as authored).
   susAltStopWords: "",
   linkStopWords: "",
   extraPlaceholderStopWords: "",
@@ -155,6 +167,7 @@ const defaultOptions = {
       maxLength: 170
     },
     HEADING_MISSING_ONE: true,
+    HEADING_UNPRONOUNCEABLE: true,
     // Image checks
     MISSING_ALT_LINK: true,
     MISSING_ALT_LINK_HAS_TEXT: true,
@@ -239,6 +252,7 @@ const defaultOptions = {
     EMBED_VIDEO: {
       sources: ""
     },
+    EMBED_VIDEO_AUTOPLAY: true,
     EMBED_DATA_VIZ: {
       sources: ""
     },
@@ -260,6 +274,8 @@ const defaultOptions = {
       dismissAll: true
     },
     QA_BLOCKQUOTE: true,
+    TABLES_SINGLE_COLUMN: true,
+    TABLES_SINGLE_CELL: true,
     TABLES_MISSING_HEADINGS: true,
     TABLES_SEMANTIC_HEADING: true,
     TABLES_EMPTY_HEADING: true,
@@ -294,6 +310,7 @@ const defaultOptions = {
     // Developer checks
     DUPLICATE_ID: true,
     META_TITLE: true,
+    META_TITLE_UNDESCRIPTIVE: true,
     UNCONTAINED_LI: true,
     TABINDEX_ATTR: true,
     HIDDEN_FOCUSABLE: true,
@@ -302,6 +319,9 @@ const defaultOptions = {
     BTN_EMPTY_LABELLEDBY: true,
     BTN_ROLE_IN_NAME: true,
     LINK_MAYBE_BUTTON: true,
+    BTN_UNPRONOUNCEABLE: true,
+    SVG_NO_ACCESSIBLE_NAME: true,
+    SUMMARY_EMPTY: true,
     // Contrast checks
     CONTRAST_WARNING: {
       dismissAll: true
@@ -412,26 +432,39 @@ const Constants = /* @__PURE__ */ (function myConstants() {
     }
     Global.scrollBehaviour = !reducedMotion || reducedMotion.matches ? "auto" : "smooth";
     Global.langDirection = Global.html.getAttribute("dir")?.trim()?.toLowerCase() === "rtl" ? "rtl" : "ltr";
-    const documentSources = State.option.checks.QA_DOCUMENT.sources;
-    const defaultDocumentSources = 'a[href$=".doc"], a[href$=".docx"], a[href*=".doc?"], a[href*=".docx?"], a[href$=".ppt"], a[href$=".pptx"], a[href*=".ppt?"], a[href*=".pptx?"], a[href^="https://drive.google.com/file"], a[href^="https://docs.google."], a[href^="https://sway."]';
-    if (documentSources) {
-      Global.documentSources = `${defaultDocumentSources}, ${documentSources}`;
+    if (State.option.checks.QA_DOCUMENT !== false) {
+      const defaultDocumentSources = 'a[href$=".doc"], a[href$=".docx"], a[href*=".doc?"], a[href*=".docx?"], a[href$=".ppt"], a[href$=".pptx"], a[href*=".ppt?"], a[href*=".pptx?"], a[href^="https://drive.google.com/file"], a[href^="https://docs.google."], a[href^="https://sway."]';
+      Global.documentSources = State.option.checks.QA_DOCUMENT.sources ? `${defaultDocumentSources}, ${State.option.checks.QA_DOCUMENT.sources}` : defaultDocumentSources;
     } else {
-      Global.documentSources = defaultDocumentSources;
+      Global.documentSources = false;
     }
-    Global.susAltWords = State.option.susAltStopWords ? State.option.susAltStopWords.split(",").map((word) => word.trim().toLowerCase()).filter(Boolean) : Lang._("SUS_ALT_STOPWORDS");
-    Global.placeholderAltSet = new Set(Lang._("PLACEHOLDER_ALT_STOPWORDS"));
-    Global.altPlaceholderPattern = generateRegexString(State.option.altPlaceholder, true);
+    if (State.option.checks.QA_PDF !== false) {
+      Global.pdfSources = State.option.checks.QA_PDF.sources ? State.option.checks.QA_PDF.sources : 'a[href$=".pdf"], a[href*=".pdf?"], a[href*="/pdf/"], a[href*="/PDF/"]';
+    } else {
+      Global.pdfSources = false;
+    }
+    const susAltWords = State.option.susAltStopWords ? State.option.susAltStopWords.split(",").map((word) => word.trim()).filter(Boolean) : Lang.list("SUS_ALT_STOPWORDS");
+    Global.susAltWords = new Map(
+      susAltWords.map((word) => [foldForMatching(word), word]).filter(([folded]) => folded)
+    );
+    Global.placeholderAltSet = new Set(Lang.list("PLACEHOLDER_ALT_STOPWORDS").map(foldForMatching));
+    const altPlaceholder = Array.isArray(State.option.altPlaceholder) ? State.option.altPlaceholder.map(stripBidiControls) : stripBidiControls(State.option.altPlaceholder);
+    Global.altPlaceholderPattern = generateRegexString(altPlaceholder, true);
     Global.linkIgnoreStringPattern = generateRegexString(State.option.linkIgnoreStrings);
-    Global.extraPlaceholderStopWords = State.option.extraPlaceholderStopWords.split(",").map((word) => word.trim().toLowerCase()).filter(Boolean);
+    Global.unpronounceablePattern = /[\p{L}\p{N}\p{Extended_Pictographic}]/u;
+    Global.extraPlaceholderStopWords = State.option.extraPlaceholderStopWords.split(",").map((word) => foldForMatching(word.trim())).filter(Boolean);
     Global.headerStringExclusionPattern = generateRegexString(State.option.headerIgnoreStrings);
     const customStopWords = State.option.linkStopWords ? State.option.linkStopWords.split(",").map((word) => word.toLowerCase().trim()) : [];
-    Global.linkStopWords = /* @__PURE__ */ new Set([...Lang._("LINK_STOPWORDS"), ...customStopWords]);
+    Global.linkStopWords = new Set(
+      [...Lang.list("LINK_STOPWORDS"), ...customStopWords].map(normalizeStopWord).filter(Boolean)
+    );
     Global.linkIgnoreStrings = new Set(
       State.option.linkIgnoreStrings.map((word) => word.toLowerCase())
     );
-    Global.clickRegex = generateRegexString(Lang._("CLICK"));
-    Global.newWindowRegex = generateRegexString(Lang._("NEW_WINDOW_PHRASES"));
+    Global.clickRegex = generateRegexString(Lang.list("CLICK").map(foldForMatching));
+    Global.newWindowRegex = generateRegexString(
+      Lang.list("NEW_WINDOW_PHRASES").map(foldForMatching)
+    );
     const defaultFileTypes = [
       "pdf",
       "doc",
@@ -484,7 +517,7 @@ const Constants = /* @__PURE__ */ (function myConstants() {
     Global.AllEmbeddedContent = `${Global.VideoSources}, ${Global.AudioSources}, ${Global.VisualizationSources}`;
   }
   const Root = {};
-  function initializeRoot2(desiredRoot, desiredReadabilityRoot, fixedRoots) {
+  function initializeRoot(desiredRoot, desiredReadabilityRoot, fixedRoots) {
     Root.areaToCheck = [];
     Root.Readability = [];
     if (fixedRoots) {
@@ -696,7 +729,7 @@ const Constants = /* @__PURE__ */ (function myConstants() {
     Exclusions.Paragraphs = State.option.paragraphIgnore ? State.option.paragraphIgnore.split(",").map(($el) => $el.trim()) : [];
   }
   return {
-    initializeRoot: initializeRoot2,
+    initializeRoot,
     Root,
     initializeGlobal,
     Global,
@@ -718,7 +751,7 @@ function find(selector, desiredRoot, exclude) {
   } else if (desiredRoot === "root") {
     root.push(Constants.Root.areaToCheck);
   } else {
-    root.push(document.querySelectorAll(desiredRoot));
+    root.push(...document.querySelectorAll(desiredRoot));
   }
   const exclusions = Constants.Exclusions.Container.join(", ");
   const additionalExclusions = exclude?.join(", ") || "";
@@ -787,6 +820,92 @@ function isAriaHidden($el) {
   if (!$el || typeof $el.getAttribute !== "function") return false;
   return $el.getAttribute("aria-hidden")?.trim().toLowerCase() === "true";
 }
+function hasAriaHiddenAncestor(element) {
+  let current = element;
+  while (current) {
+    if (isAriaHidden(current)) return true;
+    current = current.parentElement;
+  }
+  return false;
+}
+function isInert(element) {
+  let current = element;
+  while (current?.nodeType === 1) {
+    if (getCachedClosest(current, "[inert]")) return true;
+    current = current.getRootNode().host;
+  }
+  return false;
+}
+const idReferenceListAttributes = [
+  "aria-labelledby",
+  "aria-describedby",
+  "aria-controls",
+  "aria-owns",
+  "aria-activedescendant",
+  "aria-details",
+  "aria-errormessage",
+  "aria-flowto"
+];
+function getFragmentIds(link, pageUrl) {
+  const href = link.getAttribute("href")?.trim();
+  if (!href?.includes("#")) return [];
+  let fragment;
+  if (href.startsWith("#")) {
+    fragment = href.slice(1);
+  } else {
+    let url2;
+    try {
+      url2 = new URL(href, document.baseURI);
+    } catch {
+      return [];
+    }
+    const samePage = url2.origin === pageUrl.origin && url2.pathname === pageUrl.pathname && url2.search === pageUrl.search;
+    if (!samePage) return [];
+    fragment = url2.hash.slice(1);
+  }
+  if (!fragment) return [];
+  try {
+    const decoded = decodeURIComponent(fragment);
+    return decoded === fragment ? [fragment] : [fragment, decoded];
+  } catch {
+    return [fragment];
+  }
+}
+function getReferencedDuplicateIds(scope, exclude = "") {
+  if (!scope?.querySelectorAll) return [];
+  const elementsById = /* @__PURE__ */ new Map();
+  const idSelector = exclude ? `[id]:not(${exclude})` : "[id]";
+  for (const element of scope.querySelectorAll(idSelector)) {
+    const { id } = element;
+    if (!id?.trim()) continue;
+    const group = elementsById.get(id);
+    if (group) group.push(element);
+    else elementsById.set(id, [element]);
+  }
+  const duplicates = [...elementsById].filter(([, group]) => group.length > 1);
+  if (!duplicates.length) return [];
+  const referenced = /* @__PURE__ */ new Set();
+  const pageUrl = new URL(document.URL);
+  const referenceSelector = [
+    "label[for]",
+    "a[href]",
+    "area[href]",
+    ...idReferenceListAttributes.map((attribute) => `[${attribute}]`)
+  ].join(", ");
+  for (const element of scope.querySelectorAll(referenceSelector)) {
+    if (element.localName === "label" && element.hasAttribute("for")) {
+      referenced.add(element.getAttribute("for"));
+    }
+    if ((element.localName === "a" || element.localName === "area") && element.hasAttribute("href")) {
+      for (const id of getFragmentIds(element, pageUrl)) referenced.add(id);
+    }
+    for (const attribute of idReferenceListAttributes) {
+      const value = element.getAttribute(attribute);
+      if (value) for (const id of value.trim().split(/\s+/)) referenced.add(id);
+    }
+  }
+  return duplicates.filter(([id]) => referenced.has(id)).flatMap(([, group]) => group.slice(1)).sort((a, b) => a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+}
 function isPresentational($el) {
   if (!$el || typeof $el.getAttribute !== "function") return false;
   const roleAttr = $el.getAttribute("role");
@@ -794,7 +913,7 @@ function isPresentational($el) {
   return roleAttr.toLowerCase().split(/\s+/).some((role) => role === "presentation" || role === "none");
 }
 function isNegativeTabindex($el) {
-  return $el && $el.tabIndex < 0;
+  return $el?.hasAttribute("tabindex") && $el.tabIndex < 0;
 }
 function isHiddenAndUnfocusable($el) {
   return (isPresentational($el) || isAriaHidden($el)) && isNegativeTabindex($el);
@@ -812,28 +931,90 @@ function isElementVisuallyHiddenOrHidden(element) {
   return isElementHidden(element);
 }
 function stripAllSpecialCharacters(string) {
-  if (!string) return "";
-  return string.replace(/[^\p{L}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+  if (typeof string !== "string" && typeof string !== "number") return "";
+  return String(string).replace(/[^\p{L}\p{M}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
 }
-const invalidProtocolRegex = /^([^\w]*)(javascript|data|vbscript)/im;
-const htmlEntitiesRegex = /&#(\w+)(^\w|;)?/g;
+const arabicOptionalMarksRegex = /[\u064B-\u0652\u0656-\u065F\u0670\u0640]/g;
+function foldForMatching(string) {
+  if (typeof string !== "string" && typeof string !== "number") return "";
+  return String(string).toLowerCase().normalize("NFD").replace(new RegExp("(\\p{Script=Greek})\\p{M}+", "gu"), "$1").replace(/i\u0307|\u0131/g, "i").replace(arabicOptionalMarksRegex, "").normalize("NFC");
+}
+function normalizeStopWord(string) {
+  return foldForMatching(string).replace(/[^\p{L}\p{M}\p{N}\s]/gu, "").replace(/\s+/g, " ").trim();
+}
+const wordSegmenters = /* @__PURE__ */ new Map();
+function getWordSegmenter(locale) {
+  if (typeof Intl === "undefined" || typeof Intl.Segmenter !== "function") return null;
+  const key = typeof locale === "string" ? locale : "";
+  let segmenter = wordSegmenters.get(key);
+  if (!segmenter) {
+    try {
+      segmenter = new Intl.Segmenter(key || void 0, { granularity: "word" });
+    } catch {
+      segmenter = new Intl.Segmenter(void 0, { granularity: "word" });
+    }
+    wordSegmenters.set(key, segmenter);
+  }
+  return segmenter;
+}
+function containsWord(text, word, segmenter = getWordSegmenter(Lang._("LANG_CODE"))) {
+  const haystack = foldForMatching(text);
+  const needle = foldForMatching(word);
+  if (!needle) return false;
+  if (segmenter) {
+    for (const { segment, isWordLike } of segmenter.segment(haystack)) {
+      if (isWordLike && segment === needle) return true;
+    }
+    return false;
+  }
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(?:^|[^\\p{L}\\p{M}\\p{N}])${escaped}(?![\\p{L}\\p{M}\\p{N}])`, "u").test(
+    haystack
+  );
+}
+const noSpaceScriptRegex = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
+function getUndescriptiveTitleType(title, entries = [], prefixes = []) {
+  const text = foldForMatching(removeWhitespace(title));
+  if (!text) return null;
+  const prepare = (list) => (Array.isArray(list) ? list : []).map((entry) => foldForMatching(removeWhitespace(entry))).filter(Boolean);
+  const prefixList = prepare(prefixes);
+  const allEntries = [...prepare(entries), ...prefixList];
+  const isNumbered = (rest) => {
+    const stripped = rest.replace(/[\s\p{P}\p{S}]/gu, "");
+    return stripped === "" || new RegExp("^\\p{Nd}+$", "u").test(stripped);
+  };
+  if (allEntries.some((entry) => text.startsWith(entry) && isNumbered(text.slice(entry.length)))) {
+    return "error";
+  }
+  const isPrefix = (prefix) => text.startsWith(prefix) && (noSpaceScriptRegex.test(prefix.slice(-1)) || /^[^\p{L}\p{M}\p{N}]/u.test(text.slice(prefix.length)));
+  return prefixList.some(isPrefix) ? "warning" : null;
+}
+const invalidProtocolRegex = /^\W*(javascript|data|vbscript)/i;
+const htmlEntitiesRegex = /&#(?:x([0-9a-f]+)|(\d+));?/gi;
 const htmlCtrlEntityRegex = /&(newline|tab);/gi;
 const ctrlCharactersRegex = (
-  // biome-ignore lint/suspicious/noControlCharactersInRegex: original lib.
-  /[\u0000-\u001F\u007F-\u009F\u2000-\u200D\uFEFF]/gim
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: Matching control characters is the purpose.
+  /[\u0000-\u001F\u007F-\u009F\u2000-\u200D\uFEFF]/g
 );
-const urlSchemeRegex = /^.+(:|&colon;)/gim;
+const urlSchemeRegex = /^.+?(:|&colon;)/i;
 const whitespaceEscapeCharsRegex = /(\\|%5[cC])((%(6[eE]|72|74))|[nrt])/g;
+const base64ImageRegex = /^data:image\/(?:png|gif|jpe?g|webp|avif|bmp|x-icon);base64,[a-z0-9+/=\t\n\f\r ]*$/i;
 const relativeFirstCharacters = [".", "/"];
 const BLANK_URL = "about:blank";
 function isRelativeUrlWithoutProtocol(url2) {
   return relativeFirstCharacters.indexOf(url2[0]) > -1;
 }
+function decodeCharacterReference(hex, dec) {
+  const codePoint = hex !== void 0 ? Number.parseInt(hex, 16) : Number.parseInt(dec, 10);
+  const isInvalid = !Number.isFinite(codePoint) || codePoint === 0 || codePoint > 1114111 || codePoint >= 55296 && codePoint <= 57343;
+  return isInvalid ? "�" : String.fromCodePoint(codePoint);
+}
 function decodeHtmlCharacters(str) {
   const removedNullByte = str.replace(ctrlCharactersRegex, "");
-  return removedNullByte.replace(htmlEntitiesRegex, (match, dec) => {
-    return String.fromCharCode(dec);
-  });
+  return removedNullByte.replace(
+    htmlEntitiesRegex,
+    (_match, hex, dec) => decodeCharacterReference(hex, dec)
+  );
 }
 function isValidUrl(url2) {
   if (typeof URL.canParse === "function") {
@@ -855,10 +1036,10 @@ const decodeURIs = (uri) => {
 };
 function sanitizeURL(url2) {
   if (!url2 || typeof url2 !== "string") return BLANK_URL;
-  const isBase64Data = /^data:([a-z]+\/[a-z0-9-+.]+)?;base64,/i.test(url2.trim());
-  if (isBase64Data) return url2.trim();
+  const trimmedInput = url2.trim();
+  if (base64ImageRegex.test(trimmedInput)) return trimmedInput;
   let charsToDecode;
-  let decodedUrl = decodeURIs(url2.trim());
+  let decodedUrl = decodeURIs(trimmedInput);
   do {
     decodedUrl = decodeHtmlCharacters(decodedUrl).replace(htmlCtrlEntityRegex, "").replace(ctrlCharactersRegex, "").replace(whitespaceEscapeCharsRegex, "").trim();
     decodedUrl = decodeURIs(decodedUrl);
@@ -873,7 +1054,6 @@ function sanitizeURL(url2) {
   const urlScheme = urlSchemeParseResults[0].toLowerCase().trim();
   if (invalidProtocolRegex.test(urlScheme)) return BLANK_URL;
   const backSanitized = trimmedUrl.replace(/\\/g, "/");
-  if (urlScheme === "mailto:" || urlScheme.includes("://")) return backSanitized;
   if (urlScheme === "http:" || urlScheme === "https:") {
     if (!isValidUrl(backSanitized)) return BLANK_URL;
     const url3 = new URL(backSanitized);
@@ -1057,7 +1237,7 @@ function getText(element) {
     return gotText.get(element);
   }
   const ignore = fnIgnore(element);
-  const text = ignore.textContent.replace(/[\r\n]+/g, "").replace(/\s+/g, " ").trim();
+  const text = removeWhitespace(ignore.textContent);
   gotText.set(element, text);
   return text;
 }
@@ -1077,29 +1257,59 @@ const getCachedStyle = (node, pseudoElt = null) => {
   }
   return targetCache.get(node);
 };
-let parentCache = /* @__PURE__ */ new WeakMap();
+const resetStyleCache = () => {
+  styleCaches = {};
+};
+let parentCache = /* @__PURE__ */ new Map();
 function getCachedClosest(element, selector) {
-  if (!element || !selector) return null;
-  if (!parentCache.has(element)) {
-    parentCache.set(element, /* @__PURE__ */ new Map());
+  if (element?.nodeType !== 1) return null;
+  if (typeof selector !== "string" || selector.trim() === "") return null;
+  let cache = parentCache.get(selector);
+  if (!cache) {
+    try {
+      element.matches(selector);
+    } catch {
+      return null;
+    }
+    cache = /* @__PURE__ */ new WeakMap();
+    parentCache.set(selector, cache);
   }
-  const elementCache = parentCache.get(element);
-  if (elementCache.has(selector)) {
-    return elementCache.get(selector);
+  const path = [];
+  let current = element;
+  let result = null;
+  while (current) {
+    const cached = cache.get(current);
+    if (cached !== void 0) {
+      result = cached;
+      break;
+    }
+    if (current.matches(selector)) {
+      result = current;
+      break;
+    }
+    path.push(current);
+    current = current.parentElement;
   }
-  const result = element.closest(selector);
-  elementCache.set(selector, result);
+  if (result) cache.set(result, result);
+  for (let i = 0; i < path.length; i++) cache.set(path[i], result);
   return result;
 }
-function removeWhitespace(string) {
-  return string.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim();
+function resetParentCache() {
+  parentCache = /* @__PURE__ */ new Map();
 }
+function removeWhitespace(string) {
+  if (typeof string !== "string" && typeof string !== "number") return "";
+  return String(string).replace(/\s+/g, " ").trim();
+}
+const junkCharactersRegex = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F\uE000-\uF8FF]/g;
 function normalizeString(string) {
-  return removeWhitespace(string.replace(/[\u0000-\u001F\u007F-\u009F]/g, ""));
+  if (typeof string !== "string" && typeof string !== "number") return "";
+  return removeWhitespace(String(string).replace(junkCharactersRegex, ""));
 }
 function truncateString(string, maxLength) {
-  const truncatedString = string.substring(0, maxLength).trimEnd();
-  return string.length > maxLength ? `${truncatedString}...` : string;
+  if (typeof string !== "string" && typeof string !== "number") return "";
+  const truncatedString = String(string).substring(0, maxLength).trimEnd();
+  return string.length > maxLength ? `${truncatedString}...` : String(string);
 }
 const store = {
   getItem(key) {
@@ -1130,18 +1340,91 @@ const store = {
   }
 };
 function prepareDismissal(string) {
-  return String(string).replace(/([^0-9a-zA-Z])/g, "").substring(0, 256);
+  return String(string).replace(/[^\p{L}\p{N}]/gu, "").substring(0, 256);
+}
+const srcsetIntegerRegex = /^\d+$/;
+const srcsetFloatRegex = /^-?(?:\d+(?:\.\d+)?|\.\d+)(?:[eE][-+]?\d+)?$/;
+function parseSrcsetDescriptors(descriptors) {
+  let width = null;
+  let density = null;
+  let height = null;
+  for (const descriptor of descriptors.split(/\s+/)) {
+    if (!descriptor) continue;
+    const value = descriptor.slice(0, -1);
+    const type = descriptor.slice(-1);
+    if (type === "w" && srcsetIntegerRegex.test(value)) {
+      if (width !== null || density !== null) return null;
+      width = Number(value);
+      if (width === 0) return null;
+    } else if (type === "x" && srcsetFloatRegex.test(value)) {
+      if (width !== null || density !== null || height !== null) return null;
+      density = Number(value);
+      if (!Number.isFinite(density) || density <= 0) return null;
+    } else if (type === "h" && srcsetIntegerRegex.test(value)) {
+      if (height !== null || density !== null) return null;
+      height = Number(value);
+      if (height === 0) return null;
+    } else {
+      return null;
+    }
+  }
+  if (height !== null && width === null) return null;
+  return { width, density: density ?? 1 };
+}
+function parseSrcset(srcset) {
+  if (typeof srcset !== "string") return [];
+  const candidates = [];
+  const length = srcset.length;
+  let position = 0;
+  while (position < length) {
+    while (position < length && /[\s,]/.test(srcset[position])) position += 1;
+    if (position >= length) break;
+    const urlStart = position;
+    while (position < length && !/\s/.test(srcset[position])) position += 1;
+    let url2 = srcset.slice(urlStart, position);
+    let descriptors = "";
+    if (url2.endsWith(",")) {
+      url2 = url2.replace(/,+$/, "");
+    } else {
+      const descriptorStart = position;
+      let inParens = false;
+      while (position < length) {
+        const char = srcset[position];
+        if (char === "(") inParens = true;
+        else if (char === ")") inParens = false;
+        else if (char === "," && !inParens) break;
+        position += 1;
+      }
+      descriptors = srcset.slice(descriptorStart, position).trim();
+      position += 1;
+    }
+    if (!url2) continue;
+    const parsed = parseSrcsetDescriptors(descriptors);
+    if (parsed) candidates.push({ url: url2, ...parsed });
+  }
+  return candidates;
+}
+function getSmallestSrc(srcset) {
+  const candidates = parseSrcset(srcset);
+  if (!candidates.length) return void 0;
+  const withWidth = candidates.filter((c) => c.width !== null);
+  const pool = withWidth.length ? withWidth : candidates;
+  const size = (c) => withWidth.length ? c.width : c.density;
+  return pool.reduce((smallest, c) => size(c) < size(smallest) ? c : smallest).url;
 }
 function getBestImageSource(element) {
-  const getLastSrc = (src) => src?.split(/,\s+/).pop()?.trim()?.split(/\s+/)[0];
-  const resolveUrl = (src) => src ? new URL(src, window.location.href).href : null;
-  const dataSrc = getLastSrc(element.getAttribute("data-src") || element.getAttribute("srcset"));
-  if (dataSrc) return resolveUrl(dataSrc);
-  const pictureSrcset = getCachedClosest(element, "picture")?.querySelector("source[srcset]")?.getAttribute("srcset");
-  const pictureSrc = getLastSrc(pictureSrcset);
-  if (pictureSrc) return resolveUrl(pictureSrc);
-  return resolveUrl(element.getAttribute("src"));
+  const resolveUrl = (src) => {
+    if (!src) return null;
+    try {
+      return new URL(src, window.location.href).href;
+    } catch {
+      return null;
+    }
+  };
+  const pictureSrcset = () => getCachedClosest(element, "picture")?.querySelector("source[srcset]")?.getAttribute("srcset");
+  return resolveUrl(element.getAttribute("data-src")?.trim()) || resolveUrl(getSmallestSrc(element.getAttribute("data-srcset"))) || resolveUrl(getSmallestSrc(element.getAttribute("srcset"))) || resolveUrl(getSmallestSrc(pictureSrcset())) || resolveUrl(element.getAttribute("src"));
 }
+const emojiRegex = /[\p{Emoji_Presentation}\p{Extended_Pictographic}\p{Emoji_Modifier}]|\u200D|\uFE0E|\uFE0F|\u20E3/gu;
 function isVisibleTextInAccName($el, accName, exclusions = [], linkIgnoreStrings) {
   let text = "";
   const excludeSelector = exclusions?.length ? exclusions.join(",") : "";
@@ -1161,10 +1444,9 @@ function isVisibleTextInAccName($el, accName, exclusions = [], linkIgnoreStrings
       text += stripIgnored(getText(node));
     }
   });
-  const emojiRegex = /[\p{Emoji_Presentation}\p{Extended_Pictographic}]/gu;
   let visibleText = text.replace(emojiRegex, "");
   visibleText = removeWhitespace(visibleText).toLowerCase();
-  if (/^[x×✕✖✗✘]$/i.test(visibleText)) {
+  if (/^[x×✕✖✗✘]$/.test(visibleText)) {
     return false;
   }
   return visibleText.length !== 0 && !accName.toLowerCase().includes(visibleText);
@@ -1181,23 +1463,46 @@ function standardizeHref($el) {
 }
 function generateRegexString(input, matchStart = false) {
   if (!input) return null;
-  if (input instanceof RegExp) return input;
   let patterns = [];
-  if (Array.isArray(input)) {
+  if (input instanceof RegExp) {
+    patterns = [input];
+  } else if (Array.isArray(input)) {
     patterns = input;
   } else if (typeof input === "string") {
     patterns = input.split(",").map((s) => s.trim());
   } else {
     return null;
   }
-  patterns = patterns.filter((p) => p && p.length > 0);
-  if (patterns.length === 0) return null;
+  const literals = patterns.filter((p) => typeof p === "string" && p.length > 0);
+  const regexes = patterns.filter((p) => p instanceof RegExp && p.source !== "(?:)");
+  if (literals.length === 0 && regexes.length === 0) return null;
   const escapeRegExp = (string) => {
     return string.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   };
-  const joinedPatterns = patterns.map(escapeRegExp).join("|");
-  const finalPattern = matchStart ? `^(?:${joinedPatterns})` : joinedPatterns;
-  return new RegExp(finalPattern, "i");
+  const parts = [];
+  if (literals.length) {
+    const joinedPatterns = literals.map(escapeRegExp).join("|");
+    parts.push(matchStart ? `^(?:${joinedPatterns})` : `(?:${joinedPatterns})`);
+  }
+  regexes.forEach((regex) => {
+    if (regex.multiline || regex.dotAll) {
+      console.warn(
+        `Sa11y: the "m" and "s" flags are not supported when combining patterns; ignoring them on /${regex.source}/${regex.flags}.`
+      );
+    }
+    parts.push(`(?:${regex.source})`);
+  });
+  const finalPattern = parts.join("|");
+  const flags = regexes.some((regex) => regex.unicode) ? "iu" : "i";
+  try {
+    return new RegExp(finalPattern, flags);
+  } catch (error) {
+    console.warn("Sa11y: could not combine patterns into one RegExp.", input, error);
+    return null;
+  }
+}
+function stripBidiControls(text) {
+  return typeof text === "string" ? text.replace(/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, "") : text;
 }
 async function dismissDigest(pepper, message) {
   const msgUint8 = new TextEncoder().encode(pepper + message);
@@ -1428,6 +1733,7 @@ const computeAccessibleName = (element, exclusions = [], recursing = 0) => {
 };
 const Elements = (function myElements() {
   const Found = {};
+  const isExcludedLink = ($el) => isInert($el) || Constants.Exclusions.Links.some((s) => $el.matches(s));
   const contrastExcludedTags = /* @__PURE__ */ new Set([
     "AUDIO",
     "VIDEO",
@@ -1495,7 +1801,7 @@ const Elements = (function myElements() {
   function computePageText() {
     const elementSet = new Set(Found.Everything);
     return Found.Everything.filter(($el) => {
-      if ($el instanceof HTMLImageElement) return true;
+      if ($el.tagName === "IMG") return true;
       let parent = $el.parentElement;
       while (parent) {
         if (elementSet.has(parent)) return false;
@@ -1504,7 +1810,7 @@ const Elements = (function myElements() {
       return true;
     }).map(($el) => {
       let text = "";
-      if ($el instanceof HTMLImageElement) {
+      if ($el.tagName === "IMG") {
         text = $el.alt || "";
       } else if ($el.tagName === "LI") {
         text = Array.from($el.childNodes).filter((n) => n.nodeType === 3).map((n) => n.textContent).join(" ");
@@ -1532,12 +1838,13 @@ const Elements = (function myElements() {
     _readabilityComputed = false;
     _readabilityValue = null;
     buildContrastAttrSelector();
-    const badLinkSourcesRaw = State.option.checks.QA_BAD_LINK.sources;
-    const badLinkSelectors = badLinkSourcesRaw.length ? badLinkSourcesRaw.split(",").map((s) => s.trim()) : [];
+    const badLinkSourcesRaw = State.option.checks.QA_BAD_LINK?.sources;
+    const badLinkSelectors = badLinkSourcesRaw?.length ? badLinkSourcesRaw.split(",").map((s) => s.trim()) : [];
     const nestedSources = State.option.checks.QA_NESTED_COMPONENTS.sources || '[role="tablist"], details';
     Found.Everything = find("*", "root", Constants.Exclusions.Sa11yElements);
     Found.Images = [];
     Found.Links = [];
+    Found.Summary = [];
     Found.Paragraphs = [];
     Found.Lists = [];
     Found.Blockquotes = [];
@@ -1571,6 +1878,7 @@ const Elements = (function myElements() {
     ]);
     for (let i = 0; i < Found.Everything.length; i++) {
       const $el = Found.Everything[i];
+      if ($el?.nodeType !== 1) continue;
       const tag = $el.tagName;
       const role = $el.getAttribute("role")?.trim().toLowerCase();
       let handledByRole = false;
@@ -1578,7 +1886,7 @@ const Elements = (function myElements() {
         if (imageRoles.has(role) && !Constants.Exclusions.Images.some((s) => $el.matches(s))) {
           Found.Images.push($el);
           handledByRole = true;
-        } else if (role === "link" && !Constants.Exclusions.Links.some((s) => $el.matches(s))) {
+        } else if (role === "link" && !isExcludedLink($el)) {
           Found.Links.push($el);
           handledByRole = true;
         } else if (role === "button") {
@@ -1597,7 +1905,7 @@ const Elements = (function myElements() {
           case "A":
           // HTML anchor
           case "a":
-            if ($el.hasAttribute("href") && !$el.matches('[role="button"]') && !Constants.Exclusions.Links.some((s) => $el.matches(s))) {
+            if ($el.hasAttribute("href") && !$el.matches('[role="button"]') && !isExcludedLink($el)) {
               Found.Links.push($el);
               if (badLinkSelectors.length > 0 && badLinkSelectors.some((s) => $el.matches(s))) {
                 Found.CustomErrorLinks.push($el);
@@ -1642,15 +1950,19 @@ const Elements = (function myElements() {
           case "IFRAME":
           case "AUDIO":
           case "VIDEO":
+          case "EMBED":
             Found.iframes.push($el);
             break;
           case "svg":
             Found.Svg.push($el);
             break;
+          case "SUMMARY":
+            Found.Summary.push($el);
+            break;
         }
       }
       if ($el.hasAttribute("tabindex") && $el.tabIndex >= 0) Found.TabIndex.push($el);
-      if ($el.matches(nestedSources)) Found.NestedComponents.push($el);
+      if (nestedSources && $el.matches(nestedSources)) Found.NestedComponents.push($el);
       if (!contrastExcludedTags.has(tag)) {
         if (!getCachedClosest($el, contrastAncestorSelector)) {
           if (!contrastAttrSelector || !$el.matches(contrastAttrSelector)) {
@@ -1741,7 +2053,7 @@ const Elements = (function myElements() {
           break;
         case "A":
         case "a":
-          if ($el.hasAttribute("href") && !$el.matches('[role="button"]') && !Constants.Exclusions.Links.some((s) => $el.matches(s))) {
+          if ($el.hasAttribute("href") && !$el.matches('[role="button"]') && !isExcludedLink($el)) {
             Found.Links.push($el);
           }
           break;
@@ -1804,7 +2116,7 @@ function findShadowComponents(option) {
     });
   }
 }
-const version = "3.0.0-421";
+const version = "3.0.4-1122";
 const sprite = {
   alts: '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 576 512"><path fill="currentColor" d="M160 80l352 0c9 0 16 7 16 16l0 224c0 8.8-7.2 16-16 16l-21 0L388 179c-4-7-12-11-20-11s-16 4-20 11l-52 80-12-17c-5-6-12-10-19-10s-15 4-19 10L176 336 160 336c-9 0-16-7-16-16l0-224c0-9 7-16 16-16zM96 96l0 224c0 35 29 64 64 64l352 0c35 0 64-29 64-64l0-224c0-35-29-64-64-64L160 32c-35 0-64 29-64 64zM48 120c0-13-11-24-24-24S0 107 0 120L0 344c0 75 61 136 136 136l320 0c13 0 24-11 24-24s-11-24-24-24l-320 0c-49 0-88-39-88-88l0-224zm208 24a32 32 0 1 0 -64 0 32 32 0 1 0 64 0z"></path></svg>',
   close: '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 0 384 512"><path fill="currentColor" d="M343 151c13-13 13-33 0-46s-33-13-45 0L192 211 87 105c-13-13-33-13-45 0s-13 33 0 45L147 256 41 361c-13 13-13 33 0 45s33 13 45 0L192 301 297 407c13 13 33 13 45 0s13-33 0-45L237 256 343 151z"></path></svg>',
@@ -1812,11 +2124,13 @@ const sprite = {
   dismiss: '<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 512"><path fill="Currentcolor" d="M39 5C28-3 13-1 5 9S-1 35 9 43l592 464c10 8 26 6 34-4s6-26-4-34L526 387c39-41 66-86 78-118c3-8 3-17 0-25c-15-36-46-88-93-131C466 69 401 32 320 32c-68 0-125 26-169 61L39 5zM223 150C249 126 283 112 320 112c80 0 144 65 144 144c0 25-6 48-17 69L408 295c8-19 11-41 5-63c-11-42-48-69-89-71c-6-0-9 6-7 12c2 6 3 13 3 20c0 10-2 20-7 28l-90-71zM373 390c-16 7-34 10-53 10c-80 0-144-65-144-144c0-7 1-14 1-20L83 162C60 191 44 221 35 244c-3 8-3 17 0 25c15 36 46 86 93 131C175 443 239 480 320 480c47 0 89-13 126-33L373 390z"/></svg>',
   unDismiss: '<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="10" viewBox="-30 0 640 512"><path fill="Currentcolor" d="M288 32c-81 0-146 37-193 81C49 156 17 208 3 244c-3 8-3 17 0 25C17 304 49 356 95 399C142.5 443 207 480 288 480s146-37 193-81c47-44 78-95 93-131c3-8 3-17 0-25c-15-36-46-88-93-131C434 69 369 32 288 32zM144 256a144 144 0 1 1 288 0 144 144 0 1 1 -288 0zm144-64c0 35-29 64-64 64c-7 0-14-1-20-3c-6-2-12 2-12 7c.3 7 1 14 3 21c14 51 66 82 118 68s82-66 68-118c-11-42-48-69-89-71c-6-.2-9 6-7 12c2 6 3 13 3 20z"></path></svg>',
   headings: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" aria-hidden="true"><path fill="currentColor" d="M0 96C0 78 14 64 32 64l384 0c18 0 32 14 32 32s-14 32-32 32L32 128C14 128 0 114 0 96zM64 256c0-18 14-32 32-32l384 0c18 0 32 14 32 32s-14 32-32 32L96 288c-18 0-32-14-32-32zM448 416c0 18-14 32-32 32L32 448c-18 0-32-14-32-32s14-32 32-32l384 0c18 0 32 14 32 32z"></path></svg>',
-  readability: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" aria-hidden="true"><path fill="currentColor" d="M528.3 46.5l-139.8 0c-48.1 0-89.9 33.3-100.4 80.3-10.6-47-52.3-80.3-100.4-80.3L48 46.5C21.5 46.5 0 68 0 94.5L0 340.3c0 26.5 21.5 48 48 48l89.7 0c102.2 0 132.7 24.4 147.3 75 .7 2.8 5.2 2.8 6 0 14.7-50.6 45.2-75 147.3-75l89.7 0c26.5 0 48-21.5 48-48l0-245.7c0-26.4-21.3-47.9-47.7-48.1zM242 311.9c0 1.9-1.5 3.5-3.5 3.5l-160.3 0c-1.9 0-3.5-1.5-3.5-3.5l0-22.9c0-1.9 1.5-3.5 3.5-3.5l160.4 0c1.9 0 3.5 1.5 3.5 3.5l0 22.9-.1 0zm0-60.9c0 1.9-1.5 3.5-3.5 3.5l-160.3 0c-1.9 0-3.5-1.5-3.5-3.5l0-22.9c0-1.9 1.5-3.5 3.5-3.5l160.4 0c1.9 0 3.5 1.5 3.5 3.5l0 22.9-.1 0zm0-60.9c0 1.9-1.5 3.5-3.5 3.5l-160.3 0c-1.9 0-3.5-1.5-3.5-3.5l0-22.9c0-1.9 1.5-3.5 3.5-3.5l160.4 0c1.9 0 3.5 1.5 3.5 3.5l0 22.9-.1 0zM501.3 311.8c0 1.9-1.5 3.5-3.5 3.5l-160.3 0c-1.9 0-3.5-1.5-3.5-3.5l0-22.9c0-1.9 1.5-3.5 3.5-3.5l160.4 0c1.9 0 3.5 1.5 3.5 3.5l0 22.9-.1 0zm0-60.9c0 1.9-1.5 3.5-3.5 3.5l-160.3 0c-1.9 0-3.5-1.5-3.5-3.5l0-22.9c0-1.9 1.5-3.5 3.5-3.5l160.4 0c1.9 0 3.5 1.5 3.5 3.5l0 22.9-.1 0zm0-60.9c0 1.9-1.5 3.5-3.5 3.5l-160.3 0c-1.9 0-3.5-1.5-3.5-3.5l0-22.8c0-1.9 1.5-3.5 3.5-3.5l160.4 0c1.9 0 3.5 1.5 3.5 3.5l0 22.8-.1 0z"/></svg>',
+  readability: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512" aria-hidden="true"><path fill="currentColor" d="M528 47l-140 0c-48 0-90 33-100 80-11-47-52-80-100-80L48 47C22 47 0 68 0 95L0 340c0 27 22 48 48 48l90 0c102 0 133 24 147 75 .7 2.8 5.2 2.8 6 0 15-51 45-75 147-75l90 0c27 0 48-21 48-48l0-246c0-26-21-48-48-48zM242 312c0 1.9-1.5 3.5-3.5 3.5l-160 0c-1.9 0-3.5-1.5-3.5-3.5l0-23c0-1.9 1.5-3.5 3.5-3.5l160 0c1.9 0 3.5 1.5 3.5 3.5l0 23-.1 0zm0-61c0 1.9-1.5 3.5-3.5 3.5l-160 0c-1.9 0-3.5-1.5-3.5-3.5l0-23c0-1.9 1.5-3.5 3.5-3.5l160 0c1.9 0 3.5 1.5 3.5 3.5l0 23-.1 0zm0-61c0 1.9-1.5 3.5-3.5 3.5l-160 0c-1.9 0-3.5-1.5-3.5-3.5l0-23c0-1.9 1.5-3.5 3.5-3.5l160 0c1.9 0 3.5 1.5 3.5 3.5l0 23-.1 0zM501 312c0 1.9-1.5 3.5-3.5 3.5l-160 0c-1.9 0-3.5-1.5-3.5-3.5l0-23c0-1.9 1.5-3.5 3.5-3.5l160 0c1.9 0 3.5 1.5 3.5 3.5l0 23-.1 0zm0-61c0 1.9-1.5 3.5-3.5 3.5l-160 0c-1.9 0-3.5-1.5-3.5-3.5l0-23c0-1.9 1.5-3.5 3.5-3.5l160 0c1.9 0 3.5 1.5 3.5 3.5l0 23-.1 0zm0-61c0 1.9-1.5 3.5-3.5 3.5l-160 0c-1.9 0-3.5-1.5-3.5-3.5l0-23c0-1.9 1.5-3.5 3.5-3.5l160 0c1.9 0 3.5 1.5 3.5 3.5l0 23-.1 0z"/></svg>',
   next: '<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="11" viewBox="0 -15 90 120"><path fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" d="m30 00 50 50-50 50" stroke-width="18"></path></svg>',
   toggleErrors: '<svg class="errors-icon" xmlns="http://www.w3.org/2000/svg" width="10" aria-hidden="true" viewBox="0 0 448 512"><path fill="currentColor" d="M64 32C64 14 50 0 32 0S0 14 0 32L0 64 0 368 0 480c0 18 14 32 32 32s32-14 32-32l0-128 64-16c41-10 85-5 123 13c44.2 22 96 25 142 7l35-13c13-5 21-17 21-30l0-248c0-23-24-38-45-28l-10 5c-46 23-101 23-147 0c-35-18-75-22-114-13L64 48l0-16z"></path></svg>',
-  togglePass: '<svg class="pass-icon" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="-.75 -3.5 10.1699 19.1777"><path fill="currentColor" d="M3.7031,10.5527c-.3633-.6562-.6426-1.1387-.8379-1.4473l-.3105-.4863-.2344-.3574c-.5117-.7969-1.0449-1.4551-1.5996-1.9746.3164-.2617.6113-.3926.8848-.3926.3359,0,.6348.123.8965.3691s.5918.7148.9902,1.4062c.4531-1.4727,1.0293-2.8691,1.7285-4.1895.3867-.7188.7314-1.2021,1.0342-1.4502s.7041-.3721,1.2041-.3721c.2656,0,.5938.041.9844.123-1.0039.8086-1.8066,1.7695-2.4082,2.8828s-1.3789,3.0762-2.332,5.8887Z"/></svg>',
+  togglePass: '<svg class="pass-icon" aria-hidden="true" xmlns="http://www.w3.org/2000/svg" viewBox="-.75 -3.5 10 19"><path fill="currentColor" d="M3.7,11c-.36-.66-.64-1.1-.84-1.4l-.31-.49-.23-.36c-.51-.8-1-1.5-1.6-2 .32-.26.61-.39.88-.39.34,0,.63.12.9.37s.59.71.99,1.4c.45-1.5,1-2.9,1.7-4.2.39-.72.73-1.2,1-1.5s.7-.37,1.2-.37c.27,0,.59.041.98.12-1 .81-1.8,1.8-2.4,2.9s-1.4,3.1-2.3,5.9Z"/></svg>',
   toggleWarnings: '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" class="close-icon" viewBox="0 0 384 512"><path fill="currentColor" d="M343 151c13-13 13-33 0-46s-33-13-45 0L192 211 87 105c-13-13-33-13-45 0s-13 33 0 45L147 256 41 361c-13 13-13 33 0 45s33 13 45 0L192 301 297 407c13 13 33 13 45 0s13-33 0-45L237 256 343 151z"></path></svg>',
+  linkBroken: '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 50 640 640"><path fill="currentColor" d="M452 160C435 160 419 165 405 173C389 157 371 143 350 133C378 109 414 96 452 96C538 96 608 166 608 253C608 294 592 334 562 363L491 434C462 464 422 480 381 480C294 480 224 410 224 324C224 322 224 321 224 319C225 301 239 287 257 288C275 288 289 303 288 321C288 322 288 323 288 323C288 375 330 416 381 416C405 416 429 406 446 389L517 318C534 300 544 277 544 252C544 201 503 160 452 160zM307 237C305 237 303 235 302 234C289 228 275 224 260 224C235 224 212 234 194 251L123 322C106 340 96 363 96 388C96 439 137 480 189 480C205 480 221 476 235 468C251 484 269 497 290 507C262 531 226 544 189 544C102 544 32 474 32 388C32 346 49 306 78 277L149 206C178 177 218 160 260 160C346 160 416 231 416 317C416 318 416 320 416 321C416 339 401 353 383 352C366 352 352 337 352 319C352 319 352 318 352 317C352 283 334 254 307 238z"/></svg>',
+  linkHidden: '<svg xmlns="http://www.w3.org/2000/svg" aria-hidden="true" viewBox="0 50 640 640"><path fill="currentColor" d="M73 39C64 30 48 30 39 39C30 49 30 64 39 73L567 601C576 611 592 611 601 601C610 592 610 577 601 567L479 445C483 442 487 438 491 434L562 363C591 334 608 294 608 253C608 166 538 96 451 96C414 96 378 109 350 133C370 143 389 157 405 173C419 165 435 160 451 160C503 160 544 202 544 253C544 277 534 301 517 318L446 389C442 393 438 397 433 400L386 352C402 351 415 338 416 321C416 320 416 318 416 317C416 231 346 160 259 160C240 160 221 164 204 170L73 39zM258 224C259 224 259 224 260 224C275 224 289 228 302 234C304 235 305 237 307 237C334 254 352 283 352 317C352 317 352 318 352 318L258 224zM378 480L224 326C225 410 294 479 378 480zM172 274L126 228L78 277C49 306 32 346 32 387C32 474 102 544 189 544C226 544 262 531 290 507C270 497 251 483 235 467C221 475 205 480 189 480C137 480 96 438 96 387C96 363 106 339 123 322L172 273z"/></svg>',
   visualize: '<svg aria-hidden="true" xmlns="http://www.w3.org/2000/svg" width="10" viewBox="0 10 512 512"><path fill="Currentcolor" d="M152 38c10 9 11 24 2 34l-72 80c-4 5-11 8-17 8s-13-2-18-7L7 113C-2 104-2 88 7 79s25-9 34 0l22 22 55-61c9-10 24-11 34-2zm0 160c10 9 11 24 2 34l-72 80c-4 5-11 8-17 8s-13-2-18-7L7 273c-9-9-9-25 0-34s25-9 35 0l22 22 55-61c9-10 24-11 34-2zM224 96c0-18 14-32 32-32l224 0c18 0 32 14 32 32s-14 32-32 32l-224 0c-18 0-32-14-32-32zm0 160c0-18 14-32 32-32l224 0c18 0 32 14 32 32s-14 32-32 32l-224 0c-18 0-32-14-32-32zM160 416c0-18 14-32 32-32l288 0c18 0 32 14 32 32s-14 32-32 32l-288 0c-18 0-32-14-32-32zM48 368a48 48 0 1 1 0 96 48 48 0 1 1 0-96z"/></svg>'
 };
 class ConsoleErrors extends HTMLElement {
@@ -1884,18 +2198,144 @@ ${this.error.stack}
     p2.style.setProperty("max-height", "min(66vh, 300px)");
     p2.style.setProperty("overflow", "auto");
     const optionsInfo = document.createElement("span");
+    function safeStringify(root) {
+      const MAX_DEPTH = 8;
+      const seen = /* @__PURE__ */ new WeakSet();
+      function quoteKey(k) {
+        try {
+          return JSON.stringify(String(k));
+        } catch (_e) {
+          return '"[unkey]"';
+        }
+      }
+      function isHostObject(val) {
+        try {
+          if (typeof val.nodeType === "number") return true;
+        } catch (_e) {
+          return true;
+        }
+        try {
+          if (val === val.window) return true;
+        } catch (_e) {
+          return true;
+        }
+        try {
+          if (typeof val.documentElement === "object" && val.documentElement !== null) return true;
+        } catch (_e) {
+          return true;
+        }
+        return false;
+      }
+      function walk(val, depth) {
+        if (val === null) return "null";
+        if (val === void 0) return void 0;
+        let type;
+        try {
+          type = typeof val;
+        } catch (_e) {
+          return '"[unreadable]"';
+        }
+        if (type === "string") {
+          try {
+            return JSON.stringify(val);
+          } catch (_e) {
+            return '"[unstringifiable-string]"';
+          }
+        }
+        if (type === "number") return Number.isFinite(val) ? String(val) : "null";
+        if (type === "boolean") return val ? "true" : "false";
+        if (type === "bigint") return `"${String(val)}n"`;
+        if (type === "function") return '"[Function]"';
+        if (type === "symbol") return '"[Symbol]"';
+        if (type !== "object") return '"[unknown]"';
+        if (depth >= MAX_DEPTH) return '"[MaxDepth]"';
+        if (isHostObject(val)) return '"[HostObject]"';
+        try {
+          if (seen.has(val)) return '"[Circular]"';
+          seen.add(val);
+        } catch (_e) {
+          return '"[unreadable-object]"';
+        }
+        let isArr = false;
+        try {
+          isArr = Array.isArray(val);
+        } catch (_e) {
+        }
+        if (isArr) {
+          let len = 0;
+          try {
+            len = val.length >>> 0;
+          } catch (_e) {
+            return '"[unreadable-array]"';
+          }
+          const out2 = [];
+          for (let i = 0; i < len; i++) {
+            let child;
+            try {
+              child = val[i];
+            } catch (_e) {
+              out2.push('"[unreadable-item]"');
+              continue;
+            }
+            const s = walk(child, depth + 1);
+            out2.push(s === void 0 ? "null" : s);
+          }
+          return `[${out2.join(",")}]`;
+        }
+        let keys = [];
+        try {
+          keys = Object.keys(val);
+        } catch (_e) {
+          return '"[unreadable-object]"';
+        }
+        const out = [];
+        for (const k of keys) {
+          if (typeof k === "string" && (k.startsWith("__reactFiber") || k.startsWith("__reactProps") || k.startsWith("__reactEvents"))) {
+            out.push(`${quoteKey(k)}:"[ReactInternal]"`);
+            continue;
+          }
+          let child;
+          try {
+            child = val[k];
+          } catch (_e) {
+            out.push(`${quoteKey(k)}:"[unreadable-prop]"`);
+            continue;
+          }
+          const s = walk(child, depth + 1);
+          if (s !== void 0) out.push(`${quoteKey(k)}:${s}`);
+        }
+        return `{${out.join(",")}}`;
+      }
+      try {
+        const result = walk(root, 0);
+        return result === void 0 ? "null" : result;
+      } catch (e) {
+        try {
+          return `"[StringifyFailed: ${String(e?.message).replace(/"/g, "'")}]"`;
+        } catch (_e) {
+          return '"[StringifyFailed]"';
+        }
+      }
+    }
     try {
       if (State.option) {
-        const oldPepper = State.option.pepper;
-        State.option.pepper = "hidden";
-        optionsInfo.textContent += `Options: ${JSON.stringify(State.option)}`;
-        State.option.pepper = oldPepper;
+        try {
+          State.option.pepper = "hidden";
+        } catch (_e) {
+        }
+        optionsInfo.textContent += `Options: ${safeStringify(State.option)}`;
       } else {
         optionsInfo.textContent += "Options object is not available.";
       }
     } catch (e) {
-      optionsInfo.textContent += "Options object is not available.";
-      console.warn("State object is not accessible for error details.", e);
+      try {
+        optionsInfo.textContent += "Options object could not be serialized.";
+      } catch (_e) {
+      }
+      try {
+        console.warn("Editoria11y: options serialization failed.", e?.message);
+      } catch (_e) {
+      }
     }
     p2.append(optionsInfo);
     content.append(h2, p1, p2);
@@ -1905,7 +2345,7 @@ ${this.error.stack}
       () => {
         wrapper.focus();
         const close = content.querySelector(".close");
-        close.addEventListener("click", () => {
+        close?.addEventListener("click", () => {
           wrapper.remove();
         });
       },
@@ -1938,10 +2378,15 @@ const UI = {
   panelJumpNext: {},
   panelShowDismissed: {},
   theme: {},
+  baseFont: document.createElement("div"),
   version,
   english: true,
   running: false,
   runGen: 0,
+  // Milliseconds each phase of the latest check took, by name (see safeRun in run.js).
+  // Read by tests/performance.htm; also handy when investigating a slow page.
+  runTimings: {},
+  runOrigin: false,
   watching: [],
   seen: [],
   ignore: "",
@@ -1952,6 +2397,7 @@ const UI = {
   dismissedCount: 1,
   dismissedAlerts: {},
   activeRange: false,
+  activeRangeFrame: false,
   inlineAlerts: false,
   incremental: false,
   interaction: false,
@@ -1993,7 +2439,7 @@ const UI = {
   visualizing: false,
   /* Annotations initial states */
   jumpList: [],
-  openJumpPosition: Number - 1,
+  openJumpPosition: -1,
   viaJump: false,
   toggledFrom: false,
   scrollPending: 0,
@@ -2003,6 +2449,7 @@ const UI = {
     button: {},
     tip: {}
   },
+  uniqueId: 0,
   positionedFrames: [],
   recentlyAddedNodes: /* @__PURE__ */ new WeakMap()
 };
@@ -2020,7 +2467,22 @@ const smush = (obj1, obj2, skip = []) => {
     }
   });
 };
-function initializeRoot(desiredRoot, desiredReadabilityRoot, fixedRoots) {
+function rebuildExclusions() {
+  Constants.initializeExclusions();
+  Constants.Exclusions.Sa11yElements = [".ed11y-element", "ed11y-element-heading-label"];
+  Constants.Exclusions.Container = ["style", "script", "noscript"];
+  if (State.option.containerIgnore) {
+    const containerSelectors = State.option.containerIgnore.split(",").map((item) => item.trim());
+    Constants.Exclusions.Container = Constants.Exclusions.Container.concat(
+      containerSelectors.flatMap((item) => [`${item} *`, item])
+    );
+  }
+  if (State.option.ignoreElements) {
+    const elementSelectors = State.option.ignoreElements.split(",").map((item) => item.trim());
+    Constants.Exclusions.Container = Constants.Exclusions.Container.concat(elementSelectors);
+  }
+}
+function ed11yInitializeRoot(desiredRoot, desiredReadabilityRoot, fixedRoots) {
   Constants.Root.areaToCheck = [];
   Constants.Root.Readability = [];
   if (fixedRoots) {
@@ -2122,7 +2584,7 @@ function buildElementList(onlyForFilter = false) {
   if (!UI.ignoreAll && !!State.option.ignoreAllIfPresent) {
     UI.ignoreAll = document.querySelector(`:is(${State.option.ignoreAllIfPresent})`) !== null;
   }
-  initializeRoot(State.option.checkRoot, State.option.checkRoot, State.option.fixedRoots);
+  ed11yInitializeRoot(State.option.checkRoot, State.option.checkRoot, State.option.fixedRoots);
   for (let i = 0; i < UI.roots.length; i++) {
     if (State.option.fixedRoots) {
       UI.roots[i].dataset.ed11yRoot = `${i}`;
@@ -2184,9 +2646,38 @@ function resetClass(classes) {
     });
   });
 }
+function checkVisibility(el, options = {}) {
+  if (typeof el.checkVisibility === "function") {
+    return el.checkVisibility(options);
+  }
+  if (!el.isConnected) {
+    return false;
+  }
+  const checkOpacity = !!(options.opacityProperty || options.checkOpacity);
+  const checkVisibilityProperty = !!(options.visibilityProperty || options.checkVisibilityCSS);
+  let node = el;
+  while (node) {
+    const style = window.getComputedStyle(node);
+    if (style.display === "none") {
+      return false;
+    }
+    if (checkOpacity && style.opacity === "0") {
+      return false;
+    }
+    if (node === el) {
+      if (checkVisibilityProperty && (style.visibility === "hidden" || style.visibility === "collapse")) {
+        return false;
+      }
+    } else if (style.contentVisibility === "hidden") {
+      return false;
+    }
+    node = node.parentElement || node.getRootNode()?.host || null;
+  }
+  return true;
+}
 function visibleElement(el) {
   if (el) {
-    if (!el.checkVisibility({
+    if (!checkVisibility(el, {
       opacityProperty: true,
       visibilityProperty: true
     })) {
@@ -2219,7 +2710,7 @@ function firstVisibleParent(el) {
   }
 }
 function elementNotHidden(el) {
-  return el.checkVisibility() && !el.closest('[aria-hidden="true"]');
+  return checkVisibility(el) && !el.closest('[aria-hidden="true"]');
 }
 function detectShadow(container) {
   if (State.option.autoDetectShadowComponents) {
@@ -2244,7 +2735,7 @@ function detectShadow(container) {
     const providedShadow = container.querySelectorAll(State.option.shadowComponents);
     providedShadow.forEach((component) => {
       if (component.shadowRoot && component.shadowRoot.mode === "open") {
-        if (!container.matches("[data-ed11y-has-shadow-root]")) {
+        if (!component.matches("[data-ed11y-has-shadow-root]")) {
           component.setAttribute("data-ed11y-has-shadow-root", "true");
           UI.attachCSS(component.shadowRoot);
           UI.attachCSS(component);
@@ -2261,13 +2752,32 @@ function detectShadow(container) {
 const handleInitialPanelInteraction = () => {
   hideInitialCount();
 };
+let pluralRules;
+let pluralRulesFor;
+const pluralCategory = (count) => {
+  const code = Lang.langStrings.LANG_CODE;
+  if (pluralRulesFor !== code) {
+    pluralRulesFor = code;
+    try {
+      pluralRules = new Intl.PluralRules(code);
+    } catch {
+      pluralRules = null;
+    }
+  }
+  return pluralRules ? pluralRules.select(count) : "other";
+};
+const pluralKey = (base, count, fallback = base) => {
+  const key = `${base}_${pluralCategory(count)}`;
+  return Lang.langStrings[key] ? key : fallback;
+};
 const initialPanel = (ifNo) => {
   if (UI.panelInitial && UI.totalCount >= UI.panelInitial) {
     UI.panelToggle.classList.add("ed11y-preview");
     UI.panelInitial = UI.totalCount;
+    UI.panelToggleTitle.innerHTML = "";
     if (UI.totalCount > 2) {
-      UI.panelToggleTitle.innerHTML = "";
-      UI.panelToggleTitle.textContent = `${UI.totalCount}${Lang._("main_toggle_plural")}`;
+      const suffix = pluralKey("main_toggle", UI.totalCount, "main_toggle_plural");
+      UI.panelToggleTitle.textContent = `${UI.totalCount}${Lang._(suffix)}`;
     } else if (UI.totalCount > 1) {
       UI.panelToggleTitle.textContent = Lang._("main_toggle_2");
     } else {
@@ -2427,11 +2937,13 @@ function newIncrementalResults() {
   return changed;
 }
 function showError(error) {
-  customElements.define("sa11y-console-error", ConsoleErrors);
+  console.error("Editoria11y:", error);
+  if (document.querySelector("sa11y-console-error")) {
+    return;
+  }
   const consoleErrors = new ConsoleErrors(error);
   document.body.appendChild(consoleErrors);
-  UI.attachCSS(consoleErrors.shadowRoot.querySelector("*"));
-  throw Error(error);
+  UI.attachCSS(consoleErrors.shadowRoot);
 }
 function pushResult$1({
   test,
@@ -2492,22 +3004,28 @@ function checkHeaders() {
       ...params
     });
     let result = null;
-    if (headingLength === 0) {
-      const image = $el.querySelector("img");
-      const alt = image?.getAttribute("alt");
-      if (image && (!alt || alt.trim() === "" || accName === "")) {
-        result = logResult({
-          test: "HEADING_EMPTY_WITH_IMAGE",
-          args: [level],
-          margin: "-15px 30px"
-        });
-      } else {
-        result = logResult({
-          test: "HEADING_EMPTY",
-          args: [level],
-          margin: "0"
-        });
-      }
+    const image = $el.querySelector("img");
+    const alt = image?.getAttribute("alt");
+    const hasEmptyImage = image && (!alt || alt.trim() === "" || accName === "");
+    const rawText = $el.textContent || "";
+    const isUnpronounceable = rawText?.trim() !== "" && !Constants.Global.unpronounceablePattern.test(headingText);
+    if (headingLength === 0 && hasEmptyImage) {
+      result = logResult({
+        test: "HEADING_EMPTY_WITH_IMAGE",
+        args: [level],
+        margin: "-15px 30px"
+      });
+    } else if (isUnpronounceable) {
+      result = logResult({
+        test: "HEADING_UNPRONOUNCEABLE",
+        args: [headingText]
+      });
+    } else if (headingLength === 0) {
+      result = logResult({
+        test: "HEADING_EMPTY",
+        args: [level],
+        margin: "0"
+      });
     } else if (level - prevLevel > 1 && (i !== 0 || headingStartsOverride)) {
       result = logResult({
         test: "HEADING_SKIPPED_LEVEL",
@@ -2552,16 +3070,32 @@ function checkHeaders() {
 const cssFileTypeSelectors = 'a[href$=".pdf"], a[href$=".doc"], a[href$=".docx"], a[href$=".zip"], a[href$=".mp3"], a[href$=".txt"], a[href$=".exe"], a[href$=".dmg"], a[href$=".rtf"], a[href$=".pptx"], a[href$=".ppt"], a[href$=".xls"], a[href$=".xlsx"], a[href$=".csv"], a[href$=".mp4"], a[href$=".mov"], a[href$=".avi"]';
 const citationPattern = /(doi\.org\/|dl\.acm\.org\/|link\.springer\.com\/|pubmed\.ncbi\.nlm\.nih\.gov\/|scholar\.google\.com\/|ieeexplore\.ieee\.org\/|researchgate\.net\/publication\/|sciencedirect\.com\/science\/article\/|10\.\d{4,}\/)[a-z0-9/.-]+/i;
 const urlEndings = /\b(?:\.edu\/|\.gob\/|\.gov\/|\.app\/|\.com\/|\.net\/|\.org\/|\.us\/|\.ca\/|\.de\/|\.icu\/|\.uk\/|\.ru\/|\.info\/|\.top\/|\.xyz\/|\.tk\/|\.cn\/|\.ga\/|\.cf\/|\.nl\/|\.io\/|\.fr\/|\.pe\/|\.nz\/|\.pt\/|\.es\/|\.pl\/|\.ua\/)\b/i;
-const specialCharPattern = /[^a-zA-Z0-9]/;
 const htmlSymbols = /([<>↣↳←→↓«»↴]+)/;
 const checkStopWords = (textContent, stopWordsSet, stripStrings) => {
-  const stripped = textContent.replace(stripStrings, "").trim();
+  const stripped = (stripStrings ? textContent.replace(stripStrings, "") : textContent).replace(/\s+/g, " ").trim();
   if (stopWordsSet.has(stripped)) return stripped;
   return null;
 };
 function checkLinkText() {
   const seen = {};
+  let anchorNames = null;
+  const hasNamedAnchor = (name) => {
+    if (!anchorNames) {
+      anchorNames = /* @__PURE__ */ new Set();
+      for (const a of document.querySelectorAll("a[name]")) anchorNames.add(a.getAttribute("name"));
+    }
+    return anchorNames.has(name);
+  };
+  const safeDecode = (value) => {
+    try {
+      return decodeURIComponent(value);
+    } catch {
+      return value;
+    }
+  };
   Elements.Found.Links.forEach(($el) => {
+    let hasIssue = false;
+    let deferGoodLabel = null;
     const href = $el.href ? standardizeHref($el) : "";
     const titleAttr = $el.getAttribute("title");
     const targetBlank = $el.getAttribute("target")?.trim()?.toLowerCase() === "_blank";
@@ -2578,20 +3112,29 @@ function checkLinkText() {
     const strippedLinkText = stripAllSpecialCharacters(lowercaseLinkText);
     const rawTextContent = getText($el);
     const textContent = rawTextContent.toLowerCase();
+    const foldedLinkText = foldForMatching(linkText);
+    const normalizedLinkText = normalizeStopWord(linkText);
+    const foldedTextContent = foldForMatching(rawTextContent);
     const textContentIgnoredStrings = getText(
       fnIgnore($el, Constants.Exclusions.LinkSpan)
     ).replace(Constants.Global.linkIgnorePattern, "");
-    const containsNewWindowPhrases = lowercaseLinkText.match(Constants.Global.newWindowRegex)?.[0] || textContent.match(Constants.Global.newWindowRegex)?.[0];
+    const containsNewWindowPhrases = foldedLinkText.match(Constants.Global.newWindowRegex)?.[0] || foldedTextContent.match(Constants.Global.newWindowRegex)?.[0];
     const containsFileTypePhrases = lowercaseLinkText.match(Constants.Global.fileTypeRegex)?.[0] || textContent.match(Constants.Global.fileTypeRegex)?.[0];
     const fileTypeMatch = $el.matches(cssFileTypeSelectors);
-    const logResult = (params) => pushResult$1({
-      element: $el,
-      type: params.type || "warning",
-      dismiss: params.dismiss || href,
-      inline: true,
-      ...params
-    });
-    if (!$el.querySelector("img")) {
+    const logResult = (params) => {
+      const type = params.type || "warning";
+      if (type === "error" || type === "warning") {
+        hasIssue = true;
+      }
+      return pushResult$1({
+        element: $el,
+        type,
+        dismiss: params.dismiss || href,
+        inline: true,
+        ...params
+      });
+    };
+    if (!$el.querySelector("img") || hasAria) {
       if (hasAria && linkText.length !== 0) {
         const excludeSpan = fnIgnore($el, Constants.Exclusions.LinkSpan);
         const visibleLinkText = getText(excludeSpan).replace(
@@ -2599,7 +3142,7 @@ function checkLinkText() {
           ""
         );
         const stopword = checkStopWords(
-          stripAllSpecialCharacters(visibleLinkText),
+          normalizeStopWord(visibleLinkText),
           Constants.Global.linkStopWords
         );
         const visibleTextInName = isVisibleTextInAccName(
@@ -2627,7 +3170,7 @@ function checkLinkText() {
           });
         } else {
           const accessibleName = removeWhitespace(computeAccessibleName($el));
-          logResult({
+          deferGoodLabel = {
             test: "LINK_LABEL",
             type: "good",
             args: [accessibleName],
@@ -2635,7 +3178,7 @@ function checkLinkText() {
             dismiss: strippedLinkText,
             position: "afterend",
             developer: true
-          });
+          };
         }
       }
       let oneStop = false;
@@ -2656,9 +3199,8 @@ function checkLinkText() {
       const isLinkIgnoreStrings = checkStopWords(textContent, Constants.Global.linkIgnoreStrings);
       if (isLinkIgnoreStrings === textContent || isLinkIgnoreStrings === strippedLinkText) {
         triggerStopWord();
-      } else if (containsNewWindowPhrases === textContent || containsNewWindowPhrases === strippedLinkText) {
+      } else if (containsNewWindowPhrases === foldedTextContent || containsNewWindowPhrases === normalizedLinkText) {
         triggerStopWord();
-        return;
       }
       if (linkText.length === 0) {
         if (hasAriaLabelledby) {
@@ -2673,8 +3215,8 @@ function checkLinkText() {
           if (State.option.linkIgnoreSpan) {
             const spanEl = $el.querySelector(State.option.linkIgnoreSpan);
             if (spanEl) {
-              const spanText = stripAllSpecialCharacters(spanEl.textContent).trim().toLowerCase();
-              if (spanText === textContent) {
+              const spanText = normalizeStopWord(spanEl.textContent);
+              if (spanText && spanText === normalizeStopWord(rawTextContent)) {
                 triggerStopWord();
                 hasStopWordWarning = true;
               }
@@ -2697,14 +3239,13 @@ function checkLinkText() {
         return;
       }
       const isStopWord = checkStopWords(
-        strippedLinkText,
+        normalizedLinkText,
         Constants.Global.linkStopWords,
         Constants.Global.newWindowRegex
       );
-      const hasClickWord = strippedLinkText.match(Constants.Global.clickRegex)?.[0] || textContent.match(Constants.Global.clickRegex)?.[0];
+      const hasClickWord = normalizedLinkText.match(Constants.Global.clickRegex)?.[0] || foldedTextContent.match(Constants.Global.clickRegex)?.[0];
       const isCitation = lowercaseLinkText.match(citationPattern)?.[0];
       const isUrlFragment = lowercaseLinkText.startsWith("www.") || lowercaseLinkText.startsWith("http") || Boolean(lowercaseLinkText.match(urlEndings));
-      const isSingleSpecialChar = linkText.length === 1 && specialCharPattern.test(linkText);
       const matchedSymbol = lowercaseLinkText.match(htmlSymbols)?.[0];
       if (isStopWord) {
         triggerStopWord();
@@ -2727,15 +3268,15 @@ function checkLinkText() {
           args: [matchedSymbol, linkText],
           dismiss: strippedLinkText
         });
-      } else if ((isSingleSpecialChar || matchedSymbol) && !titleAttr) {
+      } else if (!Constants.Global.unpronounceablePattern.test(linkText) && !titleAttr) {
+        const pua = /[\uE000-\uF8FF]/gu.test(linkText) ? "LINK_EMPTY_NO_LABEL" : "LINK_UNPRONOUNCEABLE";
         logResult({
-          test: "LINK_UNPRONOUNCEABLE",
+          test: pua,
           type: "error",
           args: [linkText],
-          content: Lang._("LINK_UNPRONOUNCEABLE") + Lang._("LINK_TIP"),
+          content: Lang._(pua) + Lang._("LINK_TIP"),
           position: "afterend"
         });
-        return;
       }
       if (hasClickWord) {
         logResult({
@@ -2786,17 +3327,15 @@ function checkLinkText() {
         });
       }
     }
-    const hasExtension = $el.matches(Constants.Global.documentSources);
-    const hasPDF = State.option.checks.QA_PDF?.sources ? $el.matches(State.option.checks.QA_PDF.sources) : $el.matches('a[href$=".pdf"], a[href*=".pdf?"]');
-    if (hasExtension) {
+    if (Constants.Global.pdfSources && $el.matches(Constants.Global.pdfSources)) {
       logResult({
-        test: "QA_DOCUMENT",
+        test: "QA_PDF",
         args: [linkText],
         dismissSuffix: href
       });
-    } else if (hasPDF) {
+    } else if (Constants.Global.documentSources && $el.matches(Constants.Global.documentSources)) {
       logResult({
-        test: "QA_PDF",
+        test: "QA_DOCUMENT",
         args: [linkText],
         dismissSuffix: href
       });
@@ -2807,11 +3346,14 @@ function checkLinkText() {
       if ((!rawHref || rawHref.startsWith("#")) && getText($el).length !== 0 && !isHiddenAndUnfocusable($el) && !hasAttributes) {
         const targetId = rawHref?.substring(1);
         const ariaControls = $el.getAttribute("aria-controls");
-        const targetElement = targetId && (document.getElementById(targetId) || ariaControls && document.getElementById(ariaControls) || decodeURIComponent(targetId) !== targetId && document.getElementById(decodeURIComponent(targetId)) || encodeURIComponent(targetId) !== targetId && document.getElementById(encodeURIComponent(targetId)) || document.querySelector(`a[name="${CSS.escape(targetId)}"]`));
-        if (!targetElement) {
+        const decodedId = targetId && safeDecode(targetId);
+        const encodedId = targetId && encodeURIComponent(targetId);
+        const targetExists = targetId && (document.getElementById(targetId) || ariaControls && document.getElementById(ariaControls) || decodedId !== targetId && document.getElementById(decodedId) || encodedId !== targetId && document.getElementById(encodedId) || hasNamedAnchor(targetId));
+        if (!targetExists) {
           let isFauxButton = false;
-          const matchedKeyword = Lang._("POTENTIAL_UI_ELEMENTS").find(
-            (word) => accName.toLowerCase().includes(word)
+          const foldedAccName = foldForMatching(accName);
+          const matchedKeyword = Lang.list("POTENTIAL_UI_ELEMENTS").find(
+            (word) => foldedAccName.includes(foldForMatching(word))
           );
           const isSlide = Object.keys($el.dataset).some(
             (key) => key.toLowerCase().includes("slide")
@@ -2836,6 +3378,9 @@ function checkLinkText() {
         }
       }
     }
+    if (deferGoodLabel && !hasIssue) {
+      logResult(deferGoodLabel);
+    }
   });
 }
 const url = [
@@ -2852,8 +3397,8 @@ const url = [
   "http"
 ];
 const containsAltTextStopWords = (alt) => {
-  const altLowerCase = removeWhitespace(alt).toLowerCase();
-  const altOnlyLetters = removeWhitespace(altLowerCase.replace(/[^\p{L}\s]/gu, ""));
+  const altLowerCase = foldForMatching(removeWhitespace(alt));
+  const altOnlyLetters = removeWhitespace(altLowerCase.replace(/[^\p{L}\p{M}\s]/gu, ""));
   const hit = [null, null, null];
   for (const urlHit of url) {
     if (altLowerCase.includes(urlHit)) {
@@ -2865,9 +3410,15 @@ const containsAltTextStopWords = (alt) => {
     const match = altLowerCase.match(/\b\d{2,6}\s*x\s*\d{2,6}\b/);
     if (match) hit[0] = match[0];
   }
-  for (const word of Constants.Global.susAltWords) {
-    const index = altLowerCase.indexOf(word);
-    if (index > -1 && index < 6) {
+  const segmenter = getWordSegmenter(Lang._("LANG_CODE"));
+  const allWords = segmenter ? [...segmenter.segment(altLowerCase)].filter((segment) => segment.isWordLike).map((segment) => segment.segment) : (
+    // Fallback for browsers without Intl.Segmenter.
+    altOnlyLetters.split(/\s+/).filter(Boolean)
+  );
+  const wordsToCheck = [...allWords.slice(0, 2), ...allWords.slice(-1)];
+  const altNoSpaces = altOnlyLetters.replace(/\s/g, "");
+  for (const [foldedWord, word] of Constants.Global.susAltWords) {
+    if (wordsToCheck.includes(foldedWord) || noSpaceScriptRegex.test(foldedWord) && (altNoSpaces.startsWith(foldedWord) || altNoSpaces.endsWith(foldedWord))) {
       hit[1] = word;
       break;
     }
@@ -2927,14 +3478,17 @@ function checkImages() {
         key = hasAria + src;
       }
     }
-    if (test && logResult({ test, dismiss: key })) return;
+    if (test && State.option.checks[test]) {
+      logResult({ test, dismiss: key });
+      return;
+    }
     const altText = removeWhitespace(alt);
     const figure = getCachedClosest($el, "figure");
     const figcaption = figure?.querySelector("figcaption");
     const figcaptionText = figcaption ? getText(figcaption) : "";
     let decorative = alt === "";
-    if (!decorative && State.option.altPlaceholder.length) {
-      decorative = !!alt.match(Constants.Global.altPlaceholderPattern);
+    if (!decorative && Constants.Global.altPlaceholderPattern) {
+      decorative = !!stripBidiControls(alt).match(Constants.Global.altPlaceholderPattern);
     }
     if (decorative) {
       if (getCachedClosest($el, `button, [role='button']`)) return;
@@ -2944,6 +3498,7 @@ function checkImages() {
         test = carousel.querySelectorAll("img").length === 1 ? "IMAGE_DECORATIVE" : "IMAGE_DECORATIVE_CAROUSEL";
         type = "warning";
       } else if (link) {
+        if (link.getAttribute("aria-label") || link.getAttribute("aria-labelledby")) return;
         test = linkTextLength === 0 ? "LINK_IMAGE_NO_ALT_TEXT" : "LINK_IMAGE_TEXT";
         type = linkTextLength === 0 ? "error" : "good";
         key = src + linkTextLength;
@@ -2955,84 +3510,111 @@ function checkImages() {
         test = "IMAGE_DECORATIVE";
         type = "warning";
       }
-      if (test && logResult({
-        test,
-        type,
-        dismiss: key || src
-      }))
-        return;
+      if (test) {
+        if (State.option.checks[test]) {
+          logResult({ test, type, dismiss: key || src });
+          return;
+        } else {
+          if (!getCachedClosest($el, 'button, [role="button"]') && !Constants.Global.linkIgnoreStringPattern?.test(alt)) {
+            logResult({ test: "IMAGE_PASS", type: "good", args: [altText], dismiss: src + alt });
+          }
+          return;
+        }
+      }
     }
-    if (alt.replace(/"|'|\?|\.|-|\s+/g, "") === "" && linkTextLength === 0) {
-      logResult({
-        test: link ? "LINK_ALT_UNPRONOUNCEABLE" : "ALT_UNPRONOUNCEABLE",
-        args: [altText]
-      });
-      return;
+    const unpTest = link ? "LINK_ALT_UNPRONOUNCEABLE" : "ALT_UNPRONOUNCEABLE";
+    if (State.option.checks[unpTest]) {
+      if (!Constants.Global.unpronounceablePattern.test(alt) && linkTextLength === 0) {
+        logResult({
+          test: unpTest,
+          args: [altText]
+        });
+        return;
+      }
     }
     const error = containsAltTextStopWords(altText);
-    if (error[0] !== null) {
-      logResult({
+    const qualityChecks = [
+      {
+        hit: error[0],
         test: link ? "LINK_ALT_FILE_EXT" : "ALT_FILE_EXT",
-        args: [error[0], altText],
-        dismiss: src + alt
-      });
-      return;
-    } else if (error[2] !== null) {
-      logResult({
+        type: "error",
+        args: [error[0], altText]
+      },
+      {
+        hit: error[2],
         test: link ? "LINK_PLACEHOLDER_ALT" : "ALT_PLACEHOLDER",
-        args: [altText],
-        dismiss: src + alt
-      });
-      return;
-    } else if (error[1] !== null) {
-      logResult({
+        type: "error",
+        args: [altText]
+      },
+      {
+        hit: error[1],
         test: link ? "LINK_SUS_ALT" : "SUS_ALT",
         type: "warning",
-        args: [error[1], altText],
-        dismiss: src + alt
-      });
-      return;
+        args: [error[1], altText]
+      }
+    ];
+    for (const check of qualityChecks) {
+      if (check.hit !== null && State.option.checks[check.test] !== false) {
+        logResult({
+          test: check.test,
+          type: check.type,
+          args: check.args,
+          dismiss: src + alt
+        });
+        return;
+      }
     }
     const badAltTest = link ? "LINK_ALT_MAYBE_BAD" : "ALT_MAYBE_BAD";
-    const minLength = State.option.checks[badAltTest]?.minLength || 15;
-    const isTooLongSingleWord = new RegExp(`^\\S{${minLength},}$`);
-    const containsNonAlphaChar = /[^\p{L}\-,.!? ]/u.test(altText);
-    const isBadFilename = new RegExp(`^(?=[^_-]*([_-][^_-]*){3,})\\S{${minLength},}$`).test(
-      altText
-    );
-    if (isBadFilename || isTooLongSingleWord.test(alt) && containsNonAlphaChar) {
-      logResult({
-        test: badAltTest,
-        args: [altText],
-        dismiss: src + alt
-      });
-      return;
+    if (State.option.checks[badAltTest]) {
+      const minLength = State.option.checks[badAltTest]?.minLength || 15;
+      const isTooLongSingleWord = new RegExp(`^\\S{${minLength},}$`);
+      const containsNonAlphaChar = /[^\p{L}\p{M}\-,.!? «»—]/u.test(altText);
+      const isBadFilename = new RegExp(`^(?=[^_-]*([_-][^_-]*){3,})\\S{${minLength},}$`).test(
+        altText
+      );
+      const containsCJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(altText);
+      if (isBadFilename || !containsCJK && isTooLongSingleWord.test(alt) && containsNonAlphaChar) {
+        logResult({
+          test: badAltTest,
+          args: [altText],
+          dismiss: src + alt
+        });
+        return;
+      }
     }
     const warningTest = link ? "LINK_ALT_MAYBE_BAD_WARNING" : "ALT_MAYBE_BAD_WARNING";
-    const wordCount = altText.trim().split(/\s+/).length;
-    const delimiterCount = (altText.match(/[_-]/g) || []).length;
-    const hasTooMuchNoise = /^(?:\s*\d){5,}\s*$/.test(altText) || delimiterCount >= 3 && wordCount <= 2;
-    if (hasTooMuchNoise) {
-      logResult({
-        test: warningTest,
-        type: "warning",
-        content: badAltTest,
-        // We re-use this key for the tooltip.
-        args: [altText],
-        dismiss: `WARNING${src + alt}`
-      });
-      return;
+    if (State.option.checks[warningTest]) {
+      const words = altText.trim().split(/\s+/);
+      const wordCount = words.length;
+      const totalDelimiterCount = (altText.match(/[_-]/g) || []).length;
+      const isNumberString = /^(?:\s*\d){5,}\s*$/.test(altText);
+      const isPureFilename = totalDelimiterCount >= 4 && wordCount <= 2;
+      const containsSlug = words.some((word) => (word.match(/[_-]/g) || []).length >= 4);
+      const hasTooMuchNoise = isNumberString || isPureFilename || containsSlug;
+      if (hasTooMuchNoise) {
+        logResult({
+          test: warningTest,
+          type: "warning",
+          content: badAltTest,
+          // We re-use this key for the tooltip.
+          args: [altText],
+          dismiss: `WARNING${src + alt}`
+        });
+        return;
+      }
     }
     const tooLongTest = link ? "LINK_IMAGE_LONG_ALT" : "IMAGE_ALT_TOO_LONG";
-    const maxAltChars = State.option.checks[tooLongTest]?.maxLength || 250;
-    if (alt.length > maxAltChars) {
-      logResult({
-        test: tooLongTest,
-        type: "warning",
-        args: [alt.length, altText],
-        dismiss: src + alt
-      });
-      return;
+    if (State.option.checks[tooLongTest]) {
+      const maxAltChars = State.option.checks[tooLongTest]?.maxLength || 250;
+      if (alt.length > maxAltChars) {
+        logResult({
+          test: tooLongTest,
+          type: "warning",
+          args: [alt.length, altText],
+          dismiss: src + alt
+        });
+        return;
+      }
     }
     if (link && !Constants.Global.linkIgnoreStringPattern?.test(alt)) {
       const latTestName = linkTextLength === 0 ? "LINK_IMAGE_ALT" : "LINK_IMAGE_ALT_AND_TEXT";
@@ -3042,7 +3624,7 @@ function checkImages() {
         const accName = removeWhitespace(
           linkAccName.replace(Constants.Global.linkIgnoreStringPattern, "")
         );
-        const tooltip = Lang.sprintf(
+        const tooltip2 = Lang.sprintf(
           linkTextLength === 0 ? Lang._("LINK_IMAGE_ALT") : Lang._("LINK_IMAGE_ALT_AND_TEXT") + Lang._("ACC_NAME_TIP"),
           altText,
           accName
@@ -3051,29 +3633,36 @@ function checkImages() {
           test: latTestName,
           type: "warning",
           args: [altText, accName],
-          content: latRule.content ? Lang.sprintf(latRule.content, altText, accName) : tooltip,
+          content: latRule.content ? Lang.sprintf(latRule.content, altText, accName) : tooltip2,
           dismiss: src + alt
         });
         return;
       }
     }
-    if (figure && figcaption && figcaptionText.toLowerCase() === alt.toLowerCase()) {
-      logResult({
-        test: "IMAGE_FIGURE_DUPLICATE_ALT",
-        type: "warning",
-        args: [altText]
-      });
-      return;
+    if (State.option.checks.IMAGE_FIGURE_DUPLICATE_ALT) {
+      if (figure && figcaption && figcaptionText.toLowerCase() === alt.toLowerCase()) {
+        logResult({
+          test: "IMAGE_FIGURE_DUPLICATE_ALT",
+          type: "warning",
+          args: [altText]
+        });
+        return;
+      }
     }
-    const getVal = (attr) => $el.getAttribute(attr)?.trim().toLowerCase();
-    if ($el.hasAttribute("title") && getVal("title") === getVal("alt")) {
-      logResult({
-        test: "DUPLICATE_TITLE",
-        type: "warning",
-        inline: true,
-        dismiss: alt
-      });
-      return;
+    const duplicateTitleTest = State.option.checks.DUPLICATE_TITLE;
+    if (duplicateTitleTest) {
+      const getVal = (attr) => $el.getAttribute(attr)?.trim().toLowerCase();
+      if ($el.hasAttribute("title") && getVal("title") === getVal("alt")) {
+        logResult({
+          test: "DUPLICATE_TITLE",
+          type: "warning",
+          content: duplicateTitleTest.content ? Lang.sprintf(duplicateTitleTest.content, altText) : Lang.sprintf(`${Lang._("DUPLICATE_TITLE")}<hr>${Lang._("IMAGE_PASS")}`, altText),
+          args: [altText],
+          inline: true,
+          dismiss: alt
+        });
+        return;
+      }
     }
     if (!getCachedClosest($el, 'button, [role="button"]')) {
       if (Constants.Global.linkIgnoreStringPattern?.test(alt)) return;
@@ -3085,12 +3674,14 @@ function checkImages() {
       });
     }
   });
+  return;
 }
 function checkLabels() {
   if (!State.option.formLabelsPlugin) return;
   Elements.Found.Inputs.forEach(($el) => {
     const presentation = isPresentational($el) && isDisabled($el);
-    if (isElementHidden($el) || isHiddenAndUnfocusable($el) || presentation) return;
+    if (isElementHidden($el) || isHiddenAndUnfocusable($el) || presentation || isInert($el))
+      return;
     const computeName = computeAccessibleName($el);
     const inputName = removeWhitespace(computeName);
     const type = $el.getAttribute("type");
@@ -3107,12 +3698,16 @@ function checkLabels() {
       ...params
     });
     if (type === "image") {
-      if (inputName === "") logResult({ test: "LABELS_MISSING_IMAGE_INPUT" });
-      return;
+      if (inputName === "" && State.option.checks.LABELS_MISSING_IMAGE_INPUT) {
+        logResult({ test: "LABELS_MISSING_IMAGE_INPUT" });
+        return;
+      }
     }
     if (type === "reset") {
-      logResult({ test: "LABELS_INPUT_RESET", type: "warning", developer: false });
-      return;
+      if (State.option.checks.LABELS_INPUT_RESET) {
+        logResult({ test: "LABELS_INPUT_RESET", type: "warning", developer: false });
+        return;
+      }
     }
     const hasPlaceholder = $el.placeholder && $el.placeholder !== 0;
     if (hasPlaceholder) {
@@ -3226,6 +3821,7 @@ function checkQA() {
     });
   }
   Elements.Found.Tables.forEach(($el) => {
+    if (!$el) return;
     if (isElementHidden($el)) return;
     const role = $el.getAttribute("role")?.trim().toLowerCase();
     if (role && !["table", "grid", "treegrid"].includes(role)) return;
@@ -3234,20 +3830,15 @@ function checkQA() {
     const firstRow = $el.querySelector("tr") ? $el.querySelector("tr").innerHTML : $el.innerHTML;
     const invalidIds = [];
     $el.querySelectorAll("[headers]").forEach((cell) => {
-      const headerIds = cell.getAttribute("headers").trim().split(/\s+/);
-      headerIds.forEach((id) => {
-        const referencedElement = $el.querySelector(`#${id}`);
-        const doesNotExist = !referencedElement;
-        const isNotInTable = referencedElement && !$el.contains(referencedElement);
-        let isNotHeader = true;
-        if (referencedElement) {
-          const tagName = referencedElement.tagName.toLowerCase();
-          const refRole = referencedElement.getAttribute("role")?.trim().toLowerCase();
-          if (tagName === "th" || refRole === "rowheader" || refRole === "columnheader") {
-            isNotHeader = false;
-          }
+      (cell.getAttribute("headers") || "").split(/\s+/).filter(Boolean).forEach((id) => {
+        try {
+          const ref = $el.querySelector(`#${CSS.escape(id)}`);
+          const role2 = ref?.getAttribute("role")?.trim().toLowerCase();
+          const isHeader = ref && (ref.tagName === "TH" || role2 === "rowheader" || role2 === "columnheader");
+          if (!isHeader) invalidIds.push(id);
+        } catch {
+          invalidIds.push(id);
         }
-        if (doesNotExist || isNotInTable || isNotHeader) invalidIds.push(id);
       });
     });
     if (invalidIds.length > 0) {
@@ -3259,7 +3850,33 @@ function checkQA() {
         developer: true
       });
     }
-    if (tableHeaders.length === 0) {
+    const rows = Array.from($el.rows);
+    let rowGroup = null;
+    let remainingRowSpan = 0;
+    const singleColumn = rows.length > 0 && rows.every((row) => {
+      if (row.parentElement !== rowGroup) {
+        rowGroup = row.parentElement;
+        remainingRowSpan = 0;
+      }
+      if (remainingRowSpan > 0) {
+        remainingRowSpan -= 1;
+        return row.cells.length === 0;
+      }
+      if (row.cells.length !== 1 || row.cells[0].colSpan !== 1) return false;
+      remainingRowSpan = row.cells[0].rowSpan === 0 ? Infinity : row.cells[0].rowSpan - 1;
+      return true;
+    });
+    const layoutRule = singleColumn ? rows.length === 1 ? "TABLES_SINGLE_CELL" : "TABLES_SINGLE_COLUMN" : null;
+    const layoutWarningEnabled = layoutRule && State.option.checks[layoutRule];
+    if (layoutWarningEnabled) {
+      pushResult$1({
+        test: layoutRule,
+        element: $el,
+        type: "warning",
+        dismiss: firstRow
+      });
+    }
+    if (tableHeaders.length === 0 && !(layoutWarningEnabled && layoutRule === "TABLES_SINGLE_CELL")) {
       pushResult$1({
         test: "TABLES_MISSING_HEADINGS",
         element: $el,
@@ -3369,11 +3986,14 @@ function checkQA() {
           }
         }
         if (!hit) {
-          let textAfterBreak = p?.querySelector("br")?.nextSibling?.nodeValue;
-          if (textAfterBreak) {
-            textAfterBreak = textAfterBreak.replace(/<\/?[^>]+(>|$)/g, "").trim().substring(0, 2);
-            if (specialCharsMatch.test(textAfterBreak.charAt(0)) || firstPrefix === decrement(textAfterBreak) || isRoman && textAfterBreak.toLowerCase() === "ii" || !lastHitWasEmoji && textAfterBreak.match(emojiMatch)) {
-              hit = true;
+          const br = p?.querySelector("br");
+          if (br) {
+            let textAfterBreak = br.previousSibling?.textContent?.trim() ? br.nextSibling?.nodeValue : null;
+            if (textAfterBreak) {
+              textAfterBreak = textAfterBreak.replace(/<\/?[^>]+(>|$)/g, "").trim().substring(0, 2);
+              if (specialCharsMatch.test(textAfterBreak.charAt(0)) || firstPrefix === decrement(textAfterBreak) || isRoman && textAfterBreak.toLowerCase() === "ii" || !lastHitWasEmoji && textAfterBreak.match(emojiMatch)) {
+                hit = true;
+              }
             }
           }
         }
@@ -3745,6 +4365,15 @@ function memoize(fn, keyResolver) {
   };
   return memoized;
 }
+function resetContrastCaches() {
+  clearBackgroundCache();
+  if (getLuminance.clear) getLuminance.clear();
+  if (getAPCAValue.clear) getAPCAValue.clear();
+  if (calculateContrast.clear) calculateContrast.clear();
+  if (suggestColorWCAG.clear) suggestColorWCAG.clear();
+  if (suggestColorAPCA.clear) suggestColorAPCA.clear();
+  if (extractColorFromString.clear) extractColorFromString.clear();
+}
 function normalizeFontWeight(weight) {
   const numericWeight = parseInt(weight, 10);
   if (!Number.isNaN(numericWeight)) {
@@ -3759,6 +4388,17 @@ function normalizeFontWeight(weight) {
   return weightMap[weight] || 400;
 }
 let backgroundCache = /* @__PURE__ */ new WeakMap();
+function stackTranslucent(fg, bg) {
+  const fa = Math.max(Math.min(fg[3], 1), 0);
+  const ba = Math.max(Math.min(bg[3], 1), 0);
+  const outA = fa + ba * (1 - fa);
+  if (outA === 0) return [0, 0, 0, 0];
+  const out = [0, 0, 0, outA];
+  for (let i = 0; i < 3; i++) {
+    out[i] = (fg[i] * fa + bg[i] * ba * (1 - fa)) / outA;
+  }
+  return out;
+}
 function getBackground($el, shadowDetection) {
   if (backgroundCache.has($el)) {
     return backgroundCache.get($el);
@@ -3767,46 +4407,74 @@ function getBackground($el, shadowDetection) {
     if (!node) return null;
     if (shadowDetection) {
       if (node.assignedSlot) return node.assignedSlot;
-      if (node instanceof ShadowRoot) return node.host;
+      if (node.nodeType === 11 && node.host) return node.host;
     }
     return node.parentElement || node.parentNode;
   };
+  const imageBackground = (el, styles, bgImage) => {
+    const own = convertToRGBA(styles.backgroundColor);
+    let base;
+    if (own !== "unsupported") {
+      if (own[3] === 1) {
+        base = own;
+      } else {
+        const behind = resolveAbove(el, own[3] > 0 ? own : null);
+        if (Array.isArray(behind)) base = behind;
+      }
+    }
+    return { type: "image", value: bgImage, ...base && { base } };
+  };
+  const resolveAbove = (fromEl, stacked) => {
+    let layers = stacked;
+    let parentEl = getVisualParent(fromEl);
+    while (parentEl && (parentEl.nodeType === 1 || parentEl.nodeType === 11)) {
+      if (parentEl.nodeType === 11 && parentEl.host) {
+        parentEl = parentEl.host;
+        continue;
+      }
+      const parentStyles = getCachedStyle(parentEl);
+      const parentBgImage = parentStyles.backgroundImage;
+      if (parentBgImage && parentBgImage !== "none") {
+        const image = imageBackground(parentEl, parentStyles, parentBgImage);
+        return layers ? { ...image, overlay: layers } : image;
+      }
+      const parentBg = convertToRGBA(parentStyles.backgroundColor);
+      if (parentBg === "unsupported") return "unsupported";
+      if (parentBg[3] === 1) {
+        return layers ? alphaBlend(layers, parentBg) : parentBg;
+      }
+      if (parentBg[3] > 0) {
+        layers = layers ? stackTranslucent(layers, parentBg) : parentBg;
+      }
+      if (parentEl.tagName === "HTML") break;
+      parentEl = getVisualParent(parentEl);
+    }
+    return layers ? alphaBlend(layers, [255, 255, 255]) : [255, 255, 255];
+  };
   let targetEl = $el;
   let finalBackground = [255, 255, 255];
+  const path = [];
   while (targetEl && (targetEl.nodeType === 1 || targetEl.nodeType === 11)) {
-    if (targetEl instanceof ShadowRoot) {
+    if (targetEl.nodeType === 11 && targetEl.host) {
       targetEl = targetEl.host;
       continue;
     }
+    const cached = backgroundCache.get(targetEl);
+    if (cached !== void 0) {
+      finalBackground = cached;
+      break;
+    }
+    path.push(targetEl);
     const styles = getCachedStyle(targetEl);
     const bgImage = styles.backgroundImage;
     if (bgImage && bgImage !== "none") {
-      finalBackground = { type: "image", value: bgImage };
+      finalBackground = imageBackground(targetEl, styles, bgImage);
       break;
     }
     const bgColor = convertToRGBA(styles.backgroundColor);
     if (bgColor[3] !== 0 && bgColor !== "transparent") {
       if (bgColor[3] < 1) {
-        let parentEl = getVisualParent(targetEl);
-        let parentBgColor = "rgba(255, 255, 255, 1)";
-        while (parentEl && (parentEl.nodeType === 1 || parentEl.nodeType === 11)) {
-          if (parentEl instanceof ShadowRoot) {
-            parentEl = parentEl.host;
-            continue;
-          }
-          const parentStyles = getCachedStyle(parentEl);
-          const currentParentBg = parentStyles.backgroundColor;
-          if (currentParentBg !== "rgba(0, 0, 0, 0)" && currentParentBg !== "transparent") {
-            parentBgColor = currentParentBg;
-            break;
-          }
-          parentEl = getVisualParent(parentEl);
-        }
-        if (parentBgColor === "rgba(0, 0, 0, 0)" || parentBgColor === "transparent") {
-          parentBgColor = "rgba(255, 255, 255, 1)";
-        }
-        const parentColor = convertToRGBA(parentBgColor);
-        finalBackground = alphaBlend(bgColor, parentColor);
+        finalBackground = resolveAbove(targetEl, bgColor);
         break;
       }
       finalBackground = bgColor;
@@ -3818,8 +4486,11 @@ function getBackground($el, shadowDetection) {
     }
     targetEl = getVisualParent(targetEl);
   }
-  backgroundCache.set($el, finalBackground);
+  for (let i = 0; i < path.length; i++) backgroundCache.set(path[i], finalBackground);
   return finalBackground;
+}
+function clearBackgroundCache() {
+  backgroundCache = /* @__PURE__ */ new WeakMap();
 }
 const getLuminance = memoize(
   function getLuminance2(color) {
@@ -4142,7 +4813,14 @@ function checkContrast() {
     }
     if (color && color[3] === 0) continue;
     if (background.type === "image") {
-      const extractColours = extractColorFromString(background.value);
+      let extractColours = extractColorFromString(background.value);
+      if ((background.base || background.overlay) && extractColours?.length) {
+        extractColours = extractColours.map((stop) => {
+          let composited = background.base ? alphaBlend([...stop], background.base) : stop;
+          if (background.overlay) composited = alphaBlend([...background.overlay], composited);
+          return composited;
+        });
+      }
       const hasFailure = !extractColours || extractColours.some(
         (gradientStop) => checkElementContrast(
           $el,
@@ -4504,8 +5182,24 @@ function checkDeveloper() {
     });
   }
   const metaTitle = document.querySelector("title:not(svg title)");
-  if (!metaTitle || getText(metaTitle).length === 0) {
+  const title = metaTitle ? getText(metaTitle).trim() : "";
+  if (!title) {
     pushResult$1({ test: "META_TITLE", developer: true });
+  } else {
+    const flag = getUndescriptiveTitleType(
+      title,
+      Lang.list("META_TITLE_UNDESCRIPTIVE_STRINGS"),
+      Lang.list("META_TITLE_UNDESCRIPTIVE_PREFIXES")
+    );
+    if (flag) {
+      pushResult$1({
+        test: "META_TITLE_UNDESCRIPTIVE",
+        type: flag,
+        args: [title],
+        developer: true,
+        dismiss: title
+      });
+    }
   }
   const content = document.querySelector('meta[name="viewport"]')?.getAttribute("content");
   if (content) {
@@ -4529,54 +5223,37 @@ function checkDeveloper() {
     pushResult$1({ test: "META_REFRESH", developer: true });
   }
   if (State.option.checks.DUPLICATE_ID) {
-    document.querySelectorAll("body, [data-sa11y-has-shadow-root]").forEach((dom) => {
-      const allIds = /* @__PURE__ */ new Set();
-      const findDuplicateIds = (ids, withinDOM) => {
-        ids.forEach(($el) => {
-          const { id } = $el;
-          if (typeof id !== "string" || id.trim().length === 0) return;
-          if (!allIds.has(id)) {
-            allIds.add(id);
-          } else {
-            const ariaReference = Array.from(
-              withinDOM.querySelectorAll(
-                `a[href*="${id}"], label[for*="${id}"], [aria-labelledby*="${id}"], [aria-controls*="${id}"], [aria-owns*="${id}"]`
-              )
-            );
-            if (ariaReference.length > 0) {
-              pushResult$1({
-                test: "DUPLICATE_ID",
-                element: $el,
-                args: [id],
-                dismiss: `${id}${$el.textContent}`,
-                developer: true
-              });
-            }
-          }
+    const scopes = [
+      document.body,
+      ...Array.from(
+        document.querySelectorAll("[data-sa11y-has-shadow-root]"),
+        (host) => host.shadowRoot
+      )
+    ];
+    const exclude = Constants.Exclusions.Container.join(", ");
+    scopes.forEach((scope) => {
+      getReferencedDuplicateIds(scope, exclude).forEach(($el) => {
+        pushResult$1({
+          test: "DUPLICATE_ID",
+          element: $el,
+          args: [$el.id],
+          dismiss: `${$el.id}${$el.textContent}`,
+          developer: true
         });
-      };
-      if (dom.shadowRoot) {
-        const shadowRootIds = Array.from(
-          dom.shadowRoot.querySelectorAll(`[id]:not(${Constants.Exclusions.Container})`)
-        );
-        findDuplicateIds(shadowRootIds, dom.shadowRoot);
-      }
-      const regularIds = Array.from(
-        dom.querySelectorAll(`[id]:not(${Constants.Exclusions.Container})`)
-      );
-      findDuplicateIds(regularIds, dom);
+      });
     });
   }
   Elements.Found.Buttons.forEach(($el) => {
     const presentation = isPresentational($el) && isDisabled($el);
-    if (presentation || isHiddenAndUnfocusable($el) || isElementHidden($el)) return;
+    if (presentation || isInert($el) || isHiddenAndUnfocusable($el) || isElementHidden($el))
+      return;
     const accName = computeAccessibleName($el);
     const buttonText = accName.replace(/['"-\.\s]+/g, "").toLowerCase();
     const textContent = getText($el);
     const dismissBase = $el.tagName + $el.id + $el.className;
     const hasAria = $el.querySelector(":scope [aria-labelledby], :scope [aria-label]") || $el.getAttribute("aria-labelledby") || $el.getAttribute("aria-label");
     const hasAriaLabelledby = $el.querySelector(":scope [aria-labelledby]") || $el.getAttribute("aria-labelledby");
-    if (buttonText.length === 0) {
+    if (buttonText.length === 0 || !Constants.Global.unpronounceablePattern.test(buttonText)) {
       if (hasAriaLabelledby) {
         pushResult$1({
           test: "BTN_EMPTY_LABELLEDBY",
@@ -4607,9 +5284,8 @@ function checkDeveloper() {
         dismiss: dismissBase + accName,
         developer: true
       });
-      return;
     }
-    if (accName.includes(Lang._("BTN"))) {
+    if (containsWord(accName, Lang._("BTN"))) {
       pushResult$1({
         test: "BTN_ROLE_IN_NAME",
         element: $el,
@@ -4632,6 +5308,19 @@ function checkDeveloper() {
         developer: true
       });
     }
+  });
+  Elements.Found.Summary.forEach(($el) => {
+    const details = $el.parentElement;
+    const isControl = details?.tagName === "DETAILS" && details.querySelector(":scope > summary") === $el;
+    if (!isControl || computeAccessibleName($el).trim()) return;
+    pushResult$1({
+      test: "SUMMARY_EMPTY",
+      element: details,
+      args: [details],
+      content: Lang._("SUMMARY_EMPTY") + Lang._("ACC_NAME_TIP"),
+      dismiss: $el.outerHTML,
+      developer: true
+    });
   });
   Elements.Found.TabIndex.forEach(($el) => {
     if ($el.tabIndex > 0) {
@@ -4665,6 +5354,90 @@ function checkDeveloper() {
       }
     }
   });
+  if (State.option.checks.SVG_NO_ACCESSIBLE_NAME) {
+    const svgContainerSelector = [
+      "a[href]",
+      "button",
+      "label",
+      "summary",
+      "select",
+      "option",
+      "svg",
+      ...[
+        "link",
+        "button",
+        "tab",
+        "menuitem",
+        "menuitemcheckbox",
+        "menuitemradio",
+        "option",
+        "switch",
+        "checkbox",
+        "radio",
+        "treeitem",
+        "img",
+        "graphics-document",
+        "graphics-object",
+        "graphics-symbol"
+      ].map((role) => `[role="${role}"]`)
+    ].join(", ");
+    const drawsNothing = (svg) => {
+      const { width, height } = svg.getBoundingClientRect();
+      return width === 0 || height === 0 || !svg.querySelector(":scope > :not(defs, symbol, title, desc, style, script, metadata)");
+    };
+    Elements.Found.Svg.forEach((element) => {
+      if (isPresentational(element) || hasAriaHiddenAncestor(element) || isElementHidden(element) || getCachedClosest(element.parentElement, svgContainerSelector) || drawsNothing(element) || computeAccessibleName(element).trim()) {
+        return;
+      }
+      pushResult$1({
+        test: "SVG_NO_ACCESSIBLE_NAME",
+        element,
+        type: "warning",
+        args: [element],
+        developer: true,
+        dismiss: element.outerHTML
+      });
+    });
+  }
+}
+const HOLD_MS = 1e3;
+let holdTimer = 0;
+function holdMark(mark, now) {
+  mark.held = true;
+  const first = mark.heldSince === void 0;
+  if (first) {
+    mark.heldSince = now;
+  }
+  mark.holdExpired = now - mark.heldSince >= HOLD_MS;
+  return first;
+}
+function scheduleHoldExpiry() {
+  if (holdTimer) {
+    return;
+  }
+  holdTimer = window.setTimeout(() => {
+    holdTimer = 0;
+    if (!UI.showPanel || !UI.jumpList?.length) {
+      return;
+    }
+    if (UI.running) {
+      scheduleHoldExpiry();
+      return;
+    }
+    alignButtons();
+  }, HOLD_MS);
+}
+function hideMark(mark) {
+  mark.classList.add("ed11y-offscreen");
+  mark.style.transform = "translate(0px, -50px)";
+  mark.style.pointerEvents = "none";
+  if (mark.getAttribute("data-ed11y-open") === "true") {
+    mark.setAttribute("data-ed11y-action", "shut");
+  }
+}
+function showMark(mark) {
+  mark.classList.remove("ed11y-offscreen");
+  mark.style.pointerEvents = "auto";
 }
 const intersect = (a, b, x = 10) => {
   return a.left - x <= b.right && b.left - x <= a.right && a.top - x <= b.bottom && b.top - x <= a.bottom;
@@ -4706,8 +5479,26 @@ function closestScrollable(el) {
     return false;
   }
 }
+function focusLoop(wrapper) {
+  const focusLoopLeft = document.createElement("div");
+  focusLoopLeft.setAttribute("tabIndex", "0");
+  focusLoopLeft.classList.add("focus-looper");
+  const focusLoopRight = document.createElement("div");
+  focusLoopRight.setAttribute("tabindex", "0");
+  focusLoopRight.classList.add("focus-looper");
+  wrapper.insertAdjacentElement("afterbegin", focusLoopLeft);
+  wrapper.appendChild(focusLoopRight);
+  const focusables = wrapper.querySelectorAll('a, button, [tabindex="0"]');
+  const count = focusables.length;
+  focusables[0].addEventListener("focus", () => {
+    focusables[count - 2].focus();
+  });
+  focusables[count - 1].addEventListener("focus", () => {
+    focusables[1].focus();
+  });
+}
 function alignPanel() {
-  if (!UI.panelElement) {
+  if (!UI.panel || typeof UI.panel.classList?.add !== "function") {
     return false;
   }
   if (State.option.panelPosition === "left") {
@@ -4760,8 +5551,117 @@ function alignAlts() {
     el.style.setProperty("width", `${img.offsetWidth}px`);
   });
 }
+function editableFocused() {
+  const selector = "[contenteditable]:focus, [contenteditable] :focus";
+  if (document.querySelector(selector)) {
+    return true;
+  }
+  if (Array.isArray(State.option.fixedRoots)) {
+    return State.option.fixedRoots.some((root) => {
+      const doc = root?.ownerDocument;
+      return doc && doc !== document && !!doc.querySelector(selector);
+    });
+  }
+  return false;
+}
+function toMainDocRect(rect, frame) {
+  const scale = frame.scale || 1;
+  return {
+    top: rect.top * scale + frame.top,
+    left: rect.left * scale + frame.left,
+    bottom: rect.bottom * scale + frame.top,
+    right: rect.right * scale + frame.left
+  };
+}
+const ZERO_FRAME = { top: 0, left: 0, scale: 1 };
+const frameFor = (fixedRoot) => fixedRoot && UI.positionedFrames[fixedRoot] ? UI.positionedFrames[fixedRoot] : ZERO_FRAME;
+function scrollBoundsFor(result) {
+  const rect = result.scrollableParent.getBoundingClientRect();
+  const frame = frameFor(result.fixedRoot);
+  if (frame === ZERO_FRAME) {
+    return rect;
+  }
+  const bounds = toMainDocRect(rect, frame);
+  if (typeof frame.bottom === "number") {
+    bounds.top = Math.max(bounds.top, frame.top);
+    bounds.left = Math.max(bounds.left, frame.left);
+    bounds.bottom = Math.min(bounds.bottom, frame.bottom);
+    bounds.right = Math.min(bounds.right, frame.right);
+  }
+  bounds.width = Math.max(0, bounds.right - bounds.left);
+  bounds.height = Math.max(0, bounds.bottom - bounds.top);
+  return bounds;
+}
+function measureFrame(positioner) {
+  const rect = positioner.getBoundingClientRect();
+  let scale = positioner.offsetWidth > 0 && rect.width > 0 ? rect.width / positioner.offsetWidth : 1;
+  if (Math.abs(scale - 1) < 5e-3) scale = 1;
+  const isFrame = positioner.tagName === "IFRAME";
+  return {
+    top: rect.top + (isFrame ? positioner.clientTop * scale : 0),
+    left: rect.left + (isFrame ? positioner.clientLeft * scale : 0),
+    right: rect.right,
+    bottom: rect.bottom,
+    scale
+  };
+}
+function resolveAlertAttachTo(value) {
+  if (!value) {
+    return false;
+  }
+  let container = value;
+  if (typeof value === "string") {
+    try {
+      container = document.querySelector(value);
+    } catch {
+      container = null;
+    }
+  }
+  if (container?.nodeType !== 1) {
+    console.warn(
+      typeof value === "string" ? `Editoria11y: alertAttachTo "${value}" matches no element; alerts attach to panelAttachTo instead.` : "Editoria11y: alertAttachTo is not an element; alerts attach to panelAttachTo instead."
+    );
+    return false;
+  }
+  if (container.isConnected && getComputedStyle(container).position === "static") {
+    console.warn(
+      "Editoria11y: the alertAttachTo container is not positioned. Give it position: relative (or any value but static), or alerts will be misplaced."
+    );
+  }
+  return container;
+}
+let warnedDetached = false;
+function alertAttachTarget() {
+  const container = State.option.alertAttachTo;
+  if (!container) {
+    return null;
+  }
+  if (container.isConnected) {
+    warnedDetached = false;
+    return container;
+  }
+  if (!warnedDetached) {
+    warnedDetached = true;
+    console.warn(
+      "Editoria11y: the alertAttachTo container was removed from the page; alerts attach to panelAttachTo until Ed11y.setAlertAttachTo() is given a new one."
+    );
+  }
+  return null;
+}
+const alertContainer = () => alertAttachTarget() || UI.panelAttachTo;
+function alertOrigin() {
+  const container = alertAttachTarget();
+  if (!container) {
+    return { top: -window.scrollY, left: 0 };
+  }
+  const rect = container.getBoundingClientRect();
+  return {
+    top: rect.top + container.clientTop - container.scrollTop,
+    left: rect.left + container.clientLeft - container.scrollLeft
+  };
+}
 function checkEditableIntersects(focusKnown = false) {
-  if (!UI.activeRange || !focusKnown && !document.querySelector("[contenteditable]:focus, [contenteditable] :focus")) {
+  if (!UI.activeRange || !focusKnown && !editableFocused()) {
     UI.jumpList?.forEach((el) => {
       if (el.matches(".intersecting")) {
         el.classList.remove("intersecting");
@@ -4769,16 +5669,18 @@ function checkEditableIntersects(focusKnown = false) {
     });
     return;
   }
-  const activeRects = UI.activeRange.getBoundingClientRect();
+  updateFixedRootPositions();
+  const rangeRect = toMainDocRect(
+    UI.activeRange.getBoundingClientRect(),
+    frameFor(UI.activeRangeFrame)
+  );
   UI.jumpList?.forEach((el) => {
     const toggle = el.shadowRoot.querySelector(".toggle");
-    const framePositioner = el.result.fixedRoot && UI.positionedFrames[el.result.fixedRoot] ? UI.positionedFrames[el.result.fixedRoot] : { top: 0, left: 0 };
-    const rects = {};
-    rects.top = activeRects.top + framePositioner.top;
-    rects.left = activeRects.left + framePositioner.left;
-    rects.bottom = activeRects.bottom + framePositioner.top;
-    rects.right = activeRects.right + framePositioner.left;
-    if (intersect(rects, el.result.element.getBoundingClientRect(), 0) || intersect(rects, toggle.getBoundingClientRect(), 0)) {
+    const targetRect = toMainDocRect(
+      el.result.element.getBoundingClientRect(),
+      frameFor(el.result.fixedRoot)
+    );
+    if (intersect(rangeRect, targetRect, 0) || intersect(rangeRect, toggle.getBoundingClientRect(), 0)) {
       el.classList.add("intersecting");
       toggle.classList.add("intersecting");
     } else {
@@ -4787,22 +5689,29 @@ function checkEditableIntersects(focusKnown = false) {
     }
   });
 }
+function updateFixedRootPositions() {
+  UI.positionedFrames.length = 0;
+  if (!Array.isArray(State.option.framePositioners)) return;
+  State.option.framePositioners.forEach((positioner) => {
+    UI.positionedFrames.push(positioner ? measureFrame(positioner) : { top: 0, left: 0, scale: 1 });
+  });
+}
 function alignButtons() {
   if (UI.jumpList.length === 0) {
     return;
   }
-  UI.alignPending = true;
-  if (State.option.fixedRoots) {
-    UI.positionedFrames.length = 0;
-    State.option.fixedRoots.forEach((root) => {
-      if (root.framePositioner) {
-        UI.positionedFrames.push(root.framePositioner.getBoundingClientRect());
-      }
-    });
-  }
+  updateFixedRootPositions();
   let previousNudgeTop = 0;
   let previousNudgeLeft = 0;
-  const scrollTop = window.scrollY;
+  const attachedTo = UI.inlineAlerts ? null : alertAttachTarget();
+  const origin = UI.inlineAlerts ? { top: -window.scrollY, left: 0 } : alertOrigin();
+  const scrollTop = -origin.top;
+  const now = performance.now();
+  let holding = false;
+  let needsRecheck = false;
+  UI.jumpList.forEach((mark) => {
+    mark.held = false;
+  });
   if (!UI.inlineAlerts) {
     for (let i = 0; i < UI.jumpList.length; i++) {
       const mark = UI.jumpList[i];
@@ -4810,19 +5719,35 @@ function alignButtons() {
         console.warn("Editoria11y debug: element disappeared");
         continue;
       }
+      if (!mark.isConnected) {
+        needsRecheck = true;
+      }
+      const placed = typeof mark.markTop === "number" && typeof mark.markLeft === "number";
       if (!mark.result.element.isConnected) {
-        UI.forceFullCheck = true;
-        UI.interaction = true;
+        needsRecheck = true;
+        if (placed) {
+          holdMark(mark, now);
+          holding ||= !mark.holdExpired;
+          continue;
+        }
         mark.style.display = "none";
       }
       let targetOffset = mark.result.element.getBoundingClientRect();
-      let top = targetOffset.top + scrollTop;
+      const frameScale = frameFor(mark.result.fixedRoot).scale || 1;
+      let top = targetOffset.top * frameScale + scrollTop;
       if (!visible(mark.result.element)) {
         const theFirstVisibleParent = firstVisibleParent(mark.result.element);
+        if (!theFirstVisibleParent && placed) {
+          if (holdMark(mark, now)) {
+            needsRecheck = true;
+          }
+          holding ||= !mark.holdExpired;
+          continue;
+        }
         targetOffset = theFirstVisibleParent ? theFirstVisibleParent.getBoundingClientRect() : targetOffset;
-        top = targetOffset.top + scrollTop;
+        top = targetOffset.top * frameScale + scrollTop;
       }
-      let left = targetOffset.left;
+      let left = targetOffset.left * frameScale;
       if (mark.result.element.tagName === "IMG") {
         top = top + 10;
         left = left + 10;
@@ -4834,7 +5759,7 @@ function alignButtons() {
         left = left + UI.positionedFrames[mark.result.fixedRoot].left;
       }
       if (mark.result.scrollableParent) {
-        UI.jumpList[i].bounds = mark.result.scrollableParent.getBoundingClientRect();
+        UI.jumpList[i].bounds = scrollBoundsFor(mark.result);
         if (left < UI.jumpList[i].bounds.left) {
           left = UI.jumpList[i].bounds.left;
         } else if (left + 40 > UI.jumpList[i].bounds.right) {
@@ -4851,6 +5776,8 @@ function alignButtons() {
       UI.jumpList[i].targetOffset = targetOffset;
       UI.jumpList[i].markTop = top;
       UI.jumpList[i].markLeft = left;
+      mark.heldSince = void 0;
+      mark.holdExpired = false;
     }
   } else {
     UI.jumpList.forEach((mark) => {
@@ -4877,9 +5804,14 @@ function alignButtons() {
     });
   }
   UI.jumpList.forEach((mark, i) => {
+    if (mark.held) {
+      previousNudgeTop = mark.nudgeTop || 0;
+      previousNudgeLeft = mark.nudgeLeft || 0;
+      return;
+    }
     let nudgeTop = 10;
     let nudgeLeft = mark.result.element.tagName === "IMG" ? 10 : -34;
-    if (mark.markTop + scrollTop < 0) {
+    if (!attachedTo && mark.markTop + scrollTop < 0) {
       nudgeTop = -1 * (mark.markTop + scrollTop) - 6;
     }
     if (i > 0 && overlap(
@@ -4904,7 +5836,7 @@ function alignButtons() {
     let constrainLeft = 0;
     let constrainRight = window.innerWidth;
     if (mark.result.scrollableParent) {
-      const constrained = mark.result.scrollableParent.getBoundingClientRect();
+      const constrained = scrollBoundsFor(mark.result);
       constrainLeft = constrained.left;
       constrainRight = constrainLeft + constrained.width;
     } else if (mark.result.fixedRoot && UI.positionedFrames[mark.result.fixedRoot]) {
@@ -4922,10 +5854,11 @@ function alignButtons() {
       needNudge = true;
     }
     if (!UI.inlineAlerts) {
+      const writeLeft = mark.markLeft - origin.left;
       if (needNudge) {
-        mark.style.transform = `translate(${mark.markLeft + nudgeLeft}px, ${mark.markTop + nudgeTop}px)`;
+        mark.style.transform = `translate(${writeLeft + nudgeLeft}px, ${mark.markTop + nudgeTop}px)`;
       } else {
-        mark.style.transform = `translate(${mark.markLeft}px, ${mark.markTop}px)`;
+        mark.style.transform = `translate(${writeLeft}px, ${mark.markTop}px)`;
       }
     } else {
       nudgeMark(mark, nudgeLeft, nudgeTop);
@@ -4937,41 +5870,74 @@ function alignButtons() {
   });
   if (!UI.inlineAlerts) {
     UI.jumpList.forEach((mark) => {
-      if (mark.result.scrollableParent) {
-        if (!!mark.bounds && (mark.targetOffset.top - mark.bounds.top < 0 || mark.targetOffset.top - mark.bounds.bottom > 0) && !mark.matches(':focus, :focus-within, [data-ed11y-open="true"]')) {
-          mark.classList.add("ed11y-offscreen");
-          mark.style.transform = "translate(0px, -50px)";
-          mark.style.pointerEvents = "none";
-          if (mark.getAttribute("data-ed11y-open") === "true") {
-            mark.setAttribute("data-ed11y-action", "shut");
-          }
+      if (mark.held) {
+        if (mark.holdExpired) {
+          hideMark(mark);
         } else {
-          mark.classList.remove("ed11y-offscreen");
-          mark.style.pointerEvents = "auto";
+          mark.style.pointerEvents = "none";
+        }
+        return;
+      }
+      const keepShown = () => mark.matches(':focus, :focus-within, [data-ed11y-open="true"]');
+      if (mark.result.scrollableParent) {
+        const targetTop = toMainDocRect(mark.targetOffset, frameFor(mark.result.fixedRoot)).top;
+        if (!!mark.bounds && (targetTop - mark.bounds.top < 0 || targetTop - mark.bounds.bottom > 0) && !keepShown()) {
+          hideMark(mark);
+        } else {
+          showMark(mark);
         }
       } else if (mark.result.fixedRoot && UI.positionedFrames[mark.result.fixedRoot]) {
-        if (!!mark.bounds && (mark.targetOffset.top < -40 || mark.targetOffset.top + mark.bounds.top - mark.bounds.bottom > -10) && !mark.matches(':focus, :focus-within, [data-ed11y-open="true"]')) {
-          mark.classList.add("ed11y-offscreen");
-          mark.style.transform = "translate(0px, -50px)";
-          mark.style.pointerEvents = "none";
-          if (mark.getAttribute("data-ed11y-open") === "true") {
-            mark.setAttribute("data-ed11y-action", "shut");
-          }
+        const targetTop = mark.bounds ? toMainDocRect(mark.targetOffset, mark.bounds).top - mark.bounds.top : 0;
+        if (!!mark.bounds && (targetTop < -40 || targetTop > mark.bounds.bottom - mark.bounds.top - 10) && !keepShown()) {
+          hideMark(mark);
         } else {
-          mark.classList.remove("ed11y-offscreen");
-          mark.style.pointerEvents = "auto";
+          showMark(mark);
         }
       } else {
-        mark.classList.remove("ed11y-offscreen");
-        mark.style.pointerEvents = "auto";
+        showMark(mark);
       }
     });
+  }
+  if (holding) {
+    scheduleHoldExpiry();
+  }
+  if (needsRecheck) {
+    UI.forceFullCheck = true;
+    UI.interaction = true;
+    incrementalCheckDebounce();
   }
   window.setTimeout(() => {
     UI.jumpList?.forEach((mark) => {
       mark.classList.remove("ed11y-preload");
     });
   }, 0);
+}
+function pauseControlFor(video) {
+  const root = video.getRootNode();
+  if (!root?.querySelectorAll) return null;
+  const selector = 'button[aria-controls], [role="button"][aria-controls], input[type="button"][aria-controls]';
+  const isVisible = (el) => el.checkVisibility ? el.checkVisibility({ checkOpacity: true, checkVisibilityCSS: true }) : el.offsetWidth > 0 || el.offsetHeight > 0;
+  for (const control of root.querySelectorAll(selector)) {
+    if (control.disabled || control.getAttribute("aria-disabled") === "true" || !isVisible(control)) {
+      continue;
+    }
+    const ids = control.getAttribute("aria-controls").trim().split(/\s+/);
+    const hasTarget = ids.some((id) => {
+      const target = root.getElementById ? root.getElementById(id) : root.querySelector?.(`#${CSS.escape(id)}`);
+      return target?.contains(video);
+    });
+    if (hasTarget) return control;
+  }
+  return null;
+}
+function isUnpausableAutoplay($el) {
+  if ($el.tagName !== "VIDEO") return false;
+  if (!$el.autoplay && $el.paused) return false;
+  if ($el.controls) return false;
+  if (!$el.loop && Number.isFinite($el.duration) && $el.duration <= 5) return false;
+  const rect = $el.getBoundingClientRect();
+  if (rect.width < 64 && rect.height < 64) return false;
+  return !pauseControlFor($el);
 }
 function checkEmbeddedContent() {
   if (!State.option.embeddedContentPlugin) return;
@@ -4995,6 +5961,15 @@ function checkEmbeddedContent() {
         dismiss: src($el)
       });
     }
+    if (State.option.checks.EMBED_VIDEO_AUTOPLAY && isUnpausableAutoplay($el)) {
+      pushResult$1({
+        element: $el,
+        test: "EMBED_VIDEO_AUTOPLAY",
+        type: "warning",
+        developer: true,
+        dismiss: src($el)
+      });
+    }
   });
   Elements.Found.Visualizations.forEach(($el) => {
     pushResult$1({
@@ -5005,31 +5980,36 @@ function checkEmbeddedContent() {
     });
   });
   Elements.Found.iframes.forEach(($el) => {
-    if (isElementHidden($el) || isHiddenAndUnfocusable($el) || isPresentational($el) || ["VIDEO", "AUDIO"].includes($el.tagName)) {
+    if (isElementHidden($el) || isHiddenAndUnfocusable($el) || isPresentational($el) || isInert($el) || ["VIDEO", "AUDIO"].includes($el.tagName)) {
       return;
     }
     if (isNegativeTabindex($el)) {
-      pushResult$1({
-        test: "EMBED_UNFOCUSABLE",
-        element: $el,
-        dismiss: src($el),
-        developer: true
-      });
-      return;
+      if (State.option.checks.EMBED_UNFOCUSABLE) {
+        pushResult$1({
+          test: "EMBED_UNFOCUSABLE",
+          element: $el,
+          dismiss: src($el),
+          developer: true
+        });
+        return;
+      }
     }
     const aria = computeAriaLabel($el);
     const checkTitle = aria === "noAria" ? $el.getAttribute("title") || "" : aria;
     if (removeWhitespace(checkTitle).length === 0) {
+      const tagName = $el?.tagName.toLowerCase();
       pushResult$1({
         test: "EMBED_MISSING_TITLE",
         element: $el,
         dismiss: src($el),
-        developer: true
+        developer: true,
+        content: Lang.sprintf("EMBED_MISSING_TITLE", tagName),
+        args: [tagName]
       });
     }
   });
   Elements.Found.EmbeddedContent.forEach(($el) => {
-    if (isElementHidden($el) || isHiddenAndUnfocusable($el) || ["VIDEO", "AUDIO"].includes($el.tagName)) {
+    if (isElementHidden($el) || isHiddenAndUnfocusable($el) || isInert($el) || ["VIDEO", "AUDIO"].includes($el.tagName)) {
       return;
     }
     pushResult$1({
@@ -5040,19 +6020,29 @@ function checkEmbeddedContent() {
     });
   });
 }
+const linkTypes = {
+  link: { badge: "linkBrokenBadge", className: "ed11y-link-broken", severity: "error" },
+  linkManual: { badge: "linkManualBadge", className: "ed11y-link-manual", severity: "warning" }
+};
+const isLinkResult = (result) => typeof result?.type === "string" && Object.hasOwn(linkTypes, result.type);
+const isWarningStyled = (result) => result?.type !== "error" && linkTypes[result?.type]?.severity !== "error";
+const isManualLink = (result) => result?.type === "linkManual";
+const isVisualizerOnly = (result) => result?.visualizerOnly === true;
+const isHiddenByDefault = (result) => !!result?.dismissalStatus || isVisualizerOnly(result);
+const shouldDraw = (result) => !isHiddenByDefault(result) || UI.showDismissed || isVisualizerOnly(result) && !result.dismissalStatus && UI.visualizing;
 function syncResults(results) {
   if (!UI.incremental) {
-    window.setTimeout(() => {
-      document.dispatchEvent(
-        new CustomEvent("ed11yResults", {
-          // @todo cms/document new detail
-          detail: {
-            results,
-            incremental: UI.incremental
-          }
-        })
-      );
-    }, 0);
+    document.dispatchEvent(
+      new CustomEvent("ed11yResults", {
+        // @todo cms/document new detail
+        detail: {
+          results,
+          incremental: UI.incremental,
+          userAction: UI.runOrigin
+        }
+      })
+    );
+    UI.runOrigin = false;
   }
 }
 const pushResult = async (i, inContent) => {
@@ -5079,6 +6069,7 @@ async function handleSyncOnlyResults() {
   State.results.length = 0;
   await filterAlerts(true).then();
   Object.assign(State.option, UI.splitConfiguration.contentOptions);
+  rebuildExclusions();
   buildElementList(true);
   let everything = false;
   let headings = false;
@@ -5125,6 +6116,7 @@ async function handleSyncOnlyResults() {
   }
   syncResults(UI.splitConfiguration.devResults);
   Object.assign(State.option, UI.splitConfiguration.devOptions);
+  rebuildExclusions();
 }
 function countAlerts() {
   UI.dismissedCount = 0;
@@ -5135,7 +6127,13 @@ function countAlerts() {
   for (let i = State.results.length - 1; i >= 0; i--) {
     if (State.results[i].dismissalStatus) {
       UI.dismissedCount++;
-    } else if (State.results[i].type === "warning") {
+    } else if (isVisualizerOnly(State.results[i])) {
+      if (UI.visualizing) {
+        UI.warningCount++;
+      } else {
+        UI.dismissedCount++;
+      }
+    } else if (isWarningStyled(State.results[i])) {
       UI.warningCount++;
     } else {
       UI.errorCount++;
@@ -5404,8 +6402,369 @@ function checkReadability() {
     Constants.Panel.readabilityInfo.innerHTML = `<br>${Lang._("READABILITY_NOT_ENOUGH")}`;
   }
 }
+const stripPrefix = (path, prefix) => {
+  const clean = String(prefix ?? "").replace(/\/+$/, "");
+  if (!clean || !path.startsWith(clean)) {
+    return path;
+  }
+  const rest = path.slice(clean.length);
+  if (rest === "") {
+    return "/";
+  }
+  return rest.startsWith("/") ? rest : path;
+};
+const paramName = (pair) => {
+  const name = pair.split("=", 1)[0];
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+};
+const isWeb = (url2) => url2.protocol === "http:" || url2.protocol === "https:";
+const REDACTED_CREDENTIALS = "***";
+const hasCredentials = (url2) => url2.username !== "" || url2.password !== "";
+class UrlNormalizer {
+  /**
+   * @param {Object} [config]
+   * @param {string[]} [config.internalHosts] Hosts (with any port) of this site.
+   * @param {string[]} [config.prefixes] Path prefixes to strip, in order.
+   * @param {?string[]} [config.preserve] Parameters that identify an internal
+   *   link. Any other is dropped; null keeps every parameter.
+   * @param {string[]} [config.strip] Parameters always dropped.
+   * @param {string} [config.base] Resolves relative hrefs; without it they do
+   *   not parse.
+   */
+  constructor({ internalHosts, prefixes, preserve, strip, base } = {}) {
+    this.internalHosts = new Set(
+      (Array.isArray(internalHosts) ? internalHosts : []).map((host) => String(host).toLowerCase())
+    );
+    this.prefixes = Array.isArray(prefixes) ? prefixes : [];
+    this.preserve = Array.isArray(preserve) ? new Set(preserve) : null;
+    this.strip = new Set(Array.isArray(strip) ? strip : []);
+    this.base = base;
+  }
+  // The canonical form with its whole query. For rules that read parameters
+  // the stored form drops, such as an ignored "?destination=" route.
+  canonical(href) {
+    return this.reduce(href, (url2) => url2.search);
+  }
+  // The form the checker stores: canonical, less the dropped parameters.
+  identity(href) {
+    return this.reduce(href, (url2) => this.filteredSearch(url2));
+  }
+  // The URL as written but without the dropped parameters, for reporting an
+  // anchor to the server. Returns what it was given when there is nothing to
+  // filter or the URL does not parse.
+  stripParams(href) {
+    const url2 = this.parse(href);
+    if (!url2 || !this.isInternal(url2)) {
+      return href;
+    }
+    url2.search = this.filteredSearch(url2);
+    return url2.href;
+  }
+  // Whether a parsed URL is a web link to this site, without credentials.
+  isInternal(url2) {
+    return isWeb(url2) && !hasCredentials(url2) && this.internalHosts.has(url2.host.toLowerCase());
+  }
+  parse(href) {
+    try {
+      return new URL(String(href), this.base);
+    } catch {
+      return null;
+    }
+  }
+  reduce(href, internalSearch) {
+    const url2 = this.parse(href);
+    if (!url2) {
+      return null;
+    }
+    if (hasCredentials(url2)) {
+      url2.username = REDACTED_CREDENTIALS;
+      url2.password = "";
+      url2.hash = "";
+      return url2.href;
+    }
+    if (!isWeb(url2)) {
+      url2.hash = "";
+      return url2.href;
+    }
+    if (this.isInternal(url2)) {
+      const path = this.prefixes.reduce(stripPrefix, url2.pathname);
+      return `${path}${internalSearch(url2)}`;
+    }
+    return `${url2.origin}${url2.pathname}${url2.search}`;
+  }
+  // Names are compared decoded; pairs keep their encoding and order.
+  filteredSearch(url2) {
+    const kept = url2.search.slice(1).split("&").filter((pair) => {
+      if (pair === "") {
+        return false;
+      }
+      const name = paramName(pair);
+      return !this.strip.has(name) && (this.preserve === null || this.preserve.has(name));
+    });
+    return kept.length ? `?${kept.join("&")}` : "";
+  }
+}
+const LINK_STATUSES = {
+  broken: { test: "HREF_BROKEN", type: "link", label: "linkStatusBroken" },
+  unpublished: { test: "HREF_UNPUBLISHED", type: "link", label: "linkStatusUnpublished" },
+  markedBroken: { test: "HREF_MARKED_BROKEN", type: "link", label: "linkStatusMarkedBroken" },
+  access: { test: "HREF_ACCESS", type: "linkManual", label: "linkStatusAccess" },
+  unverifiable: { test: "HREF_UNVERIFIABLE", type: "linkManual", label: "linkStatusUnverifiable" },
+  redirect: { test: "HREF_REDIRECT", type: "linkManual", label: "linkStatusRedirect" },
+  serverError: { test: "HREF_SERVER_ERROR", type: "linkManual", label: "linkStatusServerError" }
+};
+const LINK_REASONS = {
+  broken: {
+    invalid_host: { test: "HREF_BAD_HOST", label: "linkReasonBadHost" },
+    malformed_url: { test: "HREF_MALFORMED", label: "linkReasonMalformed" },
+    scheme_typo: { test: "HREF_SCHEME_TYPO", label: "linkReasonSchemeTypo" },
+    missing_scheme: { test: "HREF_MISSING_HTTPS", label: "linkReasonMissingHttps" },
+    missing_mailto: { test: "HREF_MISSING_MAILTO", label: "linkReasonMissingMailto" },
+    invalid_email: { test: "HREF_EMAIL_INVALID", label: "linkReasonEmailInvalid" },
+    invalid_phone: { test: "HREF_PHONE_INVALID", label: "linkReasonPhoneInvalid" },
+    local_file: { test: "HREF_LOCAL_FILE", label: "linkReasonLocalFile" }
+  },
+  unverifiable: {
+    private: { test: "HREF_PRIVATE", label: "linkReasonPrivate" },
+    private_address: { test: "HREF_PRIVATE", label: "linkReasonPrivate" },
+    userinfo: { test: "HREF_USERINFO", label: "linkReasonUserinfo" },
+    ftp_link: { test: "HREF_FTP", label: "linkReasonFtp" },
+    app_scheme: { test: "HREF_APP_LINK", label: "linkReasonAppLink" }
+  },
+  redirect: {
+    redirect_scheme: { test: "HREF_REDIRECT_APP", label: "linkReasonRedirectApp" }
+  }
+};
+const describeEntry = (entry) => {
+  const status = LINK_STATUSES[entry.status];
+  const reason = typeof entry.reason === "string" && Object.hasOwn(LINK_REASONS[entry.status] ?? {}, entry.reason) ? LINK_REASONS[entry.status][entry.reason] : null;
+  return { ...status, ...reason };
+};
+const DISMISSED_LABELS = { ok: "linkDismissedOk", hide: "linkDismissedHide" };
+const UNFLAGGED = "unflagged";
+const isKnownLinkStatus = (status) => typeof status === "string" && Object.hasOwn(LINK_STATUSES, status);
+const isKnownCheckerStatus = (status) => status === UNFLAGGED || isKnownLinkStatus(status) && status !== "markedBroken";
+const isKnownDismissal = (dismissed) => typeof dismissed === "string" && Object.hasOwn(DISMISSED_LABELS, dismissed);
+const MANUAL_LINK_STATUSES = Object.keys(LINK_STATUSES).filter(
+  (status) => LINK_STATUSES[status].type === "linkManual"
+);
+const showsLinkCheck = (status) => Array.isArray(State.option.brokenLinksShowChecks) && State.option.brokenLinksShowChecks.includes(status);
+const linkMarksAllowed = () => typeof State.option.allowLinkMarks === "boolean" ? State.option.allowLinkMarks : !!State.option.allowOK;
+const linkStatusLabel = (entry) => {
+  if (isKnownDismissal(entry.dismissed)) {
+    return Lang._(DISMISSED_LABELS[entry.dismissed]);
+  }
+  return isKnownLinkStatus(entry.status) ? Lang._(describeEntry(entry).label) : entry.status;
+};
+const displayHref = (href) => String(href).replace(/^https?:\/\//i, "");
+const matchNormalizer = () => new UrlNormalizer({
+  internalHosts: [
+    window.location.host,
+    ...Array.isArray(State.option.brokenLinksInternalHosts) ? State.option.brokenLinksInternalHosts : []
+  ],
+  prefixes: State.option.brokenLinksPathPrefixes,
+  preserve: State.option.brokenLinksPreserveParams,
+  strip: State.option.brokenLinksStripParams,
+  base: document.baseURI
+});
+function prepareBrokenLinks() {
+  if (!Array.isArray(State.option.brokenLinks)) {
+    if (State.option.brokenLinks) {
+      console.warn("Editoria11y: brokenLinks must be an array of { href, status } objects.");
+    }
+    State.option.brokenLinks = [];
+    return;
+  }
+  State.option.brokenLinks = State.option.brokenLinks.filter((entry) => {
+    const valid = entry && typeof entry.href === "string" && entry.href && isKnownLinkStatus(entry.status);
+    if (!valid) {
+      console.warn(
+        "Editoria11y: skipped a brokenLinks entry without a valid href and status.",
+        entry
+      );
+      return false;
+    }
+    if (entry.dismissed && !isKnownDismissal(entry.dismissed)) {
+      console.warn(`Editoria11y: ignored an unknown brokenLinks dismissal "${entry.dismissed}".`);
+      delete entry.dismissed;
+    }
+    if (Object.hasOwn(entry, "checkerStatus")) {
+      if (entry.status !== "markedBroken") {
+        delete entry.checkerStatus;
+      } else if (!isKnownCheckerStatus(entry.checkerStatus)) {
+        console.warn(
+          `Editoria11y: ignored an unknown brokenLinks checkerStatus "${entry.checkerStatus}".`
+        );
+        delete entry.checkerStatus;
+      }
+    }
+    return true;
+  });
+  const preserve = State.option.brokenLinksPreserveParams;
+  if (preserve !== null && preserve !== void 0 && !Array.isArray(preserve)) {
+    console.warn("Editoria11y: brokenLinksPreserveParams must be an array of names or null.");
+    State.option.brokenLinksPreserveParams = null;
+  }
+  const strip = State.option.brokenLinksStripParams;
+  if (strip !== void 0 && !Array.isArray(strip)) {
+    console.warn("Editoria11y: brokenLinksStripParams must be an array of names.");
+    State.option.brokenLinksStripParams = [];
+  }
+  if (State.option.brokenLinksRoots && typeof State.option.brokenLinksRoots !== "string") {
+    console.warn("Editoria11y: brokenLinksRoots must be a CSS selector string.");
+    State.option.brokenLinksRoots = false;
+  }
+  if (!Array.isArray(State.option.brokenLinksShowChecks)) {
+    console.warn("Editoria11y: brokenLinksShowChecks must be an array of statuses.");
+    State.option.brokenLinksShowChecks = [...MANUAL_LINK_STATUSES];
+  }
+  State.option.brokenLinksShowChecks.forEach((status) => {
+    if (!MANUAL_LINK_STATUSES.includes(status)) {
+      console.warn(
+        `Editoria11y: brokenLinksShowChecks lists "${status}", which is not a manual check.`
+      );
+    }
+  });
+}
+const indexEntries = (normalizer) => {
+  const byHref = /* @__PURE__ */ new Map();
+  for (const entry of State.option.brokenLinks) {
+    const identity = normalizer.identity(entry.href);
+    if (identity && !byHref.has(identity)) {
+      byHref.set(identity, entry);
+    }
+    if (!byHref.has(entry.href)) {
+      byHref.set(entry.href, entry);
+    }
+  }
+  return byHref;
+};
+const buildContent = (entry, test) => {
+  const content = Lang.sprintf(test, entry.redirectsTo ?? null);
+  const target = document.createElement("p");
+  const linkWrap = document.createElement("i");
+  const link = document.createElement("a");
+  link.classList.add("ed11y-link-target");
+  link.href = entry.href;
+  link.setAttribute("target", "_blank");
+  link.setAttribute("rel", "noopener noreferrer");
+  const prefix = document.createElement("strong");
+  link.textContent = displayHref(entry.href);
+  prefix.textContent = entry.redirectsTo ? Lang._("linkRedirectOriginal") : Lang._("linksCheckThis");
+  prefix.textContent += " ";
+  target.append(prefix);
+  linkWrap.append(link);
+  target.append(linkWrap);
+  content.append(target);
+  return content;
+};
+const linkAnchors = () => {
+  const roots = State.option.brokenLinksRoots;
+  if (typeof roots !== "string" || !roots.trim()) {
+    return Elements.Found.Links;
+  }
+  try {
+    return find("a[href]", roots, Constants.Exclusions.Sa11yElements);
+  } catch (error) {
+    console.warn(`Editoria11y: could not search brokenLinksRoots "${roots}".`, error);
+    return Elements.Found.Links;
+  }
+};
+function checkBrokenLinks() {
+  if (!State.option.brokenLinks?.length) {
+    return;
+  }
+  const normalizer = matchNormalizer();
+  const byHref = indexEntries(normalizer);
+  for (const anchor of linkAnchors()) {
+    if (!anchor.matches("a[href]")) {
+      continue;
+    }
+    const entry = byHref.get(normalizer.identity(anchor.href)) ?? byHref.get(anchor.getAttribute("href"));
+    if (!entry || entry.status === UNFLAGGED) {
+      continue;
+    }
+    const status = describeEntry(entry);
+    const hash = entry.hash ?? entry.href;
+    const result = {
+      test: status.test,
+      element: anchor,
+      type: status.type,
+      content: buildContent(entry, status.test),
+      dismiss: prepareDismissal(`link${hash}`),
+      data: { hash, href: entry.href, status: entry.status, redirectsTo: entry.redirectsTo },
+      brokenLink: entry
+    };
+    if (entry.dismissed) {
+      result.dismissalStatus = entry.dismissed;
+    }
+    if (status.type === "linkManual" && !showsLinkCheck(entry.status)) {
+      result.visualizerOnly = true;
+    }
+    State.results.push(result);
+  }
+}
+const liftBrokenMark = (entry) => {
+  if (entry.status !== "markedBroken" || !isKnownCheckerStatus(entry.checkerStatus)) {
+    return;
+  }
+  entry.status = entry.checkerStatus;
+  delete entry.checkerStatus;
+};
+function applyLinkVerdict(result, action) {
+  const entry = result?.brokenLink;
+  if (!entry) {
+    return false;
+  }
+  switch (action) {
+    case "broken":
+      if (entry.status !== "markedBroken") {
+        entry.checkerStatus = entry.status;
+        entry.status = "markedBroken";
+      }
+      delete entry.dismissed;
+      return true;
+    case "ok":
+      liftBrokenMark(entry);
+      entry.dismissed = "ok";
+      return true;
+    case "hide":
+      entry.dismissed = "hide";
+      return true;
+    case "reset":
+      delete entry.dismissed;
+      if (linkMarksAllowed()) {
+        liftBrokenMark(entry);
+      }
+      return true;
+    default:
+      return false;
+  }
+}
+const linkTypeClasses = Object.values(linkTypes).map((type) => type.className);
+const decorateToggle = (toggle, result, dismissed) => {
+  const wasLink = toggle.classList.contains("ed11y-link");
+  toggle.classList.remove("ed11y-link", ...linkTypeClasses);
+  toggle.classList.toggle("dismissable", isWarningStyled(result) && !dismissed);
+  if (isLinkResult(result)) {
+    const linkType = linkTypes[result.type];
+    toggle.classList.add("ed11y-link", linkType.className);
+    toggle.setAttribute("aria-label", Lang._(linkType.badge));
+    toggle.innerHTML = dismissed ? sprite.linkHidden : sprite.linkBroken;
+  } else if (wasLink) {
+    toggle.setAttribute(
+      "aria-label",
+      result.type !== "error" ? Lang._("WARNING") : Lang._("ERROR")
+    );
+    toggle.innerHTML = dismissed ? sprite.dismiss : "";
+  }
+};
 const showAltPanel = () => {
-  const altList = UI.panel?.querySelector("#ed11y-alt-list");
+  const altList = UI.panel !== false && UI.panel.querySelector("#ed11y-alt-list");
   if (!altList) {
     return;
   }
@@ -5495,6 +6854,70 @@ const showAltPanel = () => {
     altList.appendChild(noImages);
   }
 };
+const showLinksPanel = () => {
+  const linkList = UI.panel !== false && UI.panel.querySelector("#ed11y-link-list");
+  if (!linkList) {
+    return;
+  }
+  linkList.innerHTML = "";
+  const links = State.results.filter((result) => isLinkResult(result) && result.brokenLink);
+  links.reverse();
+  if (links.length === 0) {
+    const none = document.createElement("p");
+    const em = document.createElement("em");
+    em.textContent = Lang._("PANEL_NO_LINKS");
+    none.append(em);
+    linkList.append(none);
+    return;
+  }
+  links.forEach((result) => {
+    const entry = result.brokenLink;
+    const dismissed = !!result.dismissalStatus;
+    const li = document.createElement("li");
+    li.classList.add("ed11y-link-row");
+    if (!dismissed) {
+      li.classList.add(isWarningStyled(result) ? "ed11y-warning" : "ed11y-error");
+    }
+    const markWrapper = document.createElement("span");
+    markWrapper.classList.add("ed11y-result-wrapper", "ed11y-link-row-mark");
+    const button = document.createElement("button");
+    button.setAttribute("type", "button");
+    button.classList.add("toggle");
+    if (dismissed) {
+      button.classList.add("dismissed");
+    }
+    decorateToggle(button, result, dismissed);
+    button.setAttribute("title", Lang._("linkJumpTitle"));
+    button.setAttribute(
+      "aria-label",
+      `${Lang._("linkJumpTitle")}: ${linkStatusLabel(entry)}, ${displayHref(entry.href)}`
+    );
+    const index = State.results.indexOf(result);
+    if (index > -1) {
+      button.dataset.ed11yResult = `${index}`;
+    }
+    button.addEventListener("click", (event) => {
+      event.preventDefault();
+      const mark = result.toggle;
+      if (!mark?.isConnected || mark.dataset.ed11yJumpPosition === void 0) {
+        return;
+      }
+      UI.openJumpPosition = Number.parseInt(mark.dataset.ed11yJumpPosition, 10) - 1;
+      jumpTo();
+    });
+    markWrapper.append(button);
+    const status = document.createElement("span");
+    status.classList.add("ed11y-link-status");
+    status.textContent = linkStatusLabel(entry);
+    const link = document.createElement("a");
+    link.href = entry.href;
+    link.setAttribute("target", "_blank");
+    link.setAttribute("rel", "noopener noreferrer");
+    link.textContent = displayHref(entry.href);
+    li.append(markWrapper, status, link);
+    linkList.append(li);
+  });
+};
 function visualize() {
   if (!UI.panel) {
     return;
@@ -5523,6 +6946,7 @@ function visualize() {
   UI.panel.querySelector("#ed11y-visualizers").removeAttribute("hidden");
   showAltPanel();
   showHeadingsPanel();
+  showLinksPanel();
   if (State.option.readabilityPlugin) {
     showReadability();
   }
@@ -5536,7 +6960,7 @@ const showReadability = () => {
   }
 };
 function showHeadingsPanel() {
-  const panelOutline = UI.panel?.querySelector("#ed11y-outline");
+  const panelOutline = UI.panel !== false && UI.panel.querySelector("#ed11y-outline");
   if (!panelOutline) {
     return;
   }
@@ -5559,7 +6983,7 @@ function showHeadingsPanel() {
       const leftPad = 7 * result.headingLevel - 7;
       const li = document.createElement("li");
       li.classList.add(`level${result.headingLevel}`);
-      li.style.setProperty("margin-left", `${leftPad}px`);
+      li.style.setProperty("margin-inline-start", `${leftPad}px`);
       const levelPrefix = document.createElement("strong");
       levelPrefix.textContent = `H${result.headingLevel}: `;
       const userText = document.createElement("span");
@@ -5597,10 +7021,10 @@ function drawResult(result, index) {
     if (mark2.dismissable !== nextDismissable || mark2.dismissed !== nextDismissed) {
       mark2.dismissable = nextDismissable;
       mark2.dismissed = nextDismissed;
-      mark2.toggle.classList.toggle("dismissable", nextDismissable && !nextDismissed);
       mark2.toggle.classList.toggle("dismissed", nextDismissed);
       mark2.toggle.innerHTML = nextDismissed ? sprite.dismiss : "";
     }
+    decorateToggle(mark2.toggle, result, nextDismissed);
     if (mark2.tip) {
       mark2.tip.remove();
       mark2.tip = null;
@@ -5625,7 +7049,7 @@ function drawResult(result, index) {
   mark.setAttribute("data-ed11y-open", "false");
   if (!UI.inlineAlerts) {
     mark.classList.add("ed11y-editable-result");
-    UI.panelAttachTo.insertAdjacentElement("beforeend", mark);
+    alertContainer().insertAdjacentElement("beforeend", mark);
   } else {
     result.element.insertAdjacentElement(result.position, mark);
   }
@@ -5642,7 +7066,6 @@ function drawResult(result, index) {
   mark.toggle.setAttribute("class", "toggle");
   const label = mark.dismissable ? Lang._("WARNING") : Lang._("ERROR");
   mark.toggle.setAttribute("aria-label", label);
-  mark.toggle.setAttribute("aria-expanded", "false");
   mark.toggle.setAttribute("aria-haspopup", "dialog");
   mark.toggle.setAttribute("data-ed11y-result", mark.dataset.ed11yResult);
   mark.toggle.setAttribute("data-ed11y-ready", "false");
@@ -5653,15 +7076,14 @@ function drawResult(result, index) {
   if (mark.dismissed) {
     mark.toggle.innerHTML = sprite.dismiss;
     mark.toggle.classList.add("dismissed");
-  } else if (mark.dismissable) {
-    mark.toggle.classList.add("dismissable");
   }
+  decorateToggle(mark.toggle, mark.result, mark.dismissed);
   mark.wrapper.appendChild(mark.toggle);
   mark.toggle.addEventListener("click", mark.toggleClick);
   mark.toggle.addEventListener("focus", mark.handleFocus);
   mark.toggle.addEventListener("mouseover", mark.handleHover);
   mark.tipNeedsBuild = true;
-  UI.attachCSS(mark.wrapper);
+  UI.attachCSS(shadow);
   shadow.appendChild(mark.wrapper);
   UI.jumpList.unshift(mark);
   State.results[index].toggle = mark;
@@ -5689,6 +7111,14 @@ function prepareCustomRuleset() {
   State.option.customRules?.forEach((cr) => {
     Lang.testNames[cr.testKey] = cr.testName;
     Lang.langStrings[cr.testKey] = `<div class="title" tabindex="-1">${sanitizeHTML(cr.testName)}</div>${sanitizeHTML(cr.tipContent)}`;
+    if (!cr.caseSensitive) {
+      if (cr.includeText.length) {
+        cr.includeText = cr.includeText.map((inc) => inc.toLowerCase());
+      }
+      if (cr.excludeText.length) {
+        cr.excludeText = cr.excludeText.map((exc) => exc.toLowerCase());
+      }
+    }
   });
 }
 const pushCustomRule = (cr, el, text) => {
@@ -5771,8 +7201,17 @@ function checkCustomRuleset() {
     });
   }
 }
+function resetCaches() {
+  resetGetText();
+  resetStyleCache();
+  resetParentCache();
+  resetContrastCaches();
+}
 function showResults() {
   buildJumpList();
+  if (UI.visualizing) {
+    showLinksPanel();
+  }
   document.dispatchEvent(new CustomEvent("ed11yPanelOpened"));
   alignButtons();
   if (!UI.inlineAlerts) {
@@ -5809,11 +7248,8 @@ function updatePanel() {
       resetResults(true);
     } else {
       State.results.push(...UI.oldResults);
-      if (!UI.alignPending) {
-        alignButtons();
-        alignPanel();
-        UI.alignPending = false;
-      }
+      alignButtons();
+      alignPanel();
       UI.running = false;
       resumeObservers();
       return;
@@ -5821,7 +7257,7 @@ function updatePanel() {
   } else {
     if (UI.totalCount > 0) {
       UI.seen[encodeURI(State.option.currentPage)] = UI.totalCount;
-      localStorage.setItem("editoria11yResultCount", JSON.stringify(UI.seen));
+      store.setItem("editoria11yResultCount", JSON.stringify(UI.seen));
     } else {
       delete UI.seen[encodeURI(State.option.currentPage)];
     }
@@ -5836,7 +7272,7 @@ function updatePanel() {
       UI.panelElement.classList.add("ed11y-preload");
       document.body.appendChild(UI.panelElement);
       UI.panel = UI.panelElement.shadowRoot.getElementById("ed11y-panel");
-      UI.attachCSS(UI.panel);
+      UI.attachCSS(UI.panelElement.shadowRoot);
       UI.panelToggle = UI.panel.querySelector("#ed11y-toggle");
       UI.panelToggleTitle = UI.panel.querySelector("#ed11y-toggle .ed11y-sr-only");
       UI.panelCount = UI.panel.querySelector(".toggle-count");
@@ -5860,6 +7296,27 @@ function updatePanel() {
         UI.panel.querySelector("#readability-info").appendChild(Constants.Panel.readabilityInfo);
         UI.panel.querySelector("#readability-details").appendChild(Constants.Panel.readabilityDetails);
         UI.panel.querySelector("#ed11y-readability-tab .summary-title").textContent = Lang._("READABILITY");
+        focusLoop(detailsTab);
+      }
+      if (State.option.brokenLinks?.length) {
+        const linksTab = document.createElement("details");
+        linksTab.id = "ed11y-links-tab";
+        linksTab.innerHTML = `
+            <summary>${sprite.linkBroken}<span class="summary-title"></span><span class="close-details">${sprite.close}</span>
+            </summary>
+            <div class="details ed11y-small">
+              <p class="details-title"></p>
+              <ul id="ed11y-link-list"></ul>
+            </div>`;
+        linksTab.querySelector(".summary-title").textContent = Lang._("LINKS");
+        linksTab.querySelector(".details-title").textContent = Lang._("panelCheckLinks");
+        linksTab.addEventListener("toggle", () => {
+          if (linksTab.open && !UI.showDismissed) {
+            setShowDismissals(true);
+          }
+        });
+        focusLoop(linksTab);
+        UI.panel.querySelector("#ed11y-visualizers").appendChild(linksTab);
       }
       window.setTimeout(
         () => {
@@ -5891,7 +7348,9 @@ function updatePanel() {
             UI.panelToggle.click();
           } else if (event.target.hasAttribute("data-ed11y-open")) {
             if (UI.tipOpen) {
-              UI.toggledFrom?.focus();
+              if (UI.toggledFrom) {
+                UI.toggledFrom.focus();
+              }
               UI.openTip.button.shadowRoot.querySelector("button").click();
             }
           }
@@ -5920,21 +7379,20 @@ function updatePanel() {
       UI.showPanel = true;
       UI.panel.classList.remove("ed11y-shut");
       UI.panel.classList.add("ed11y-active");
-      const preferredDismissHide = UI.dismissedCount > 1 ? Lang.sprintf("buttonHideHiddenAlerts", UI.dismissedCount).textContent : Lang._("buttonHideHiddenAlert");
+      const preferredDismissHide = UI.dismissedCount > 1 ? Lang.sprintf(pluralKey("buttonHideHiddenAlerts", UI.dismissedCount), UI.dismissedCount).textContent : Lang._("buttonHideHiddenAlert");
       if (UI.dismissedCount === 0) {
         UI.panelShowDismissed.setAttribute("hidden", "");
         UI.panelShowDismissed.setAttribute("data-ed11y-pressed", "false");
         UI.showDismissed = false;
       } else if (UI.dismissedCount === 1) {
-        const show = UI.english ? Lang._("buttonShowHiddenAlert") : Lang.sprintf("PANEL_DISMISS_BUTTON", "1").textContent;
-        UI.panelShowDismissed.querySelector(".ed11y-sr-only").textContent = UI.showDismissed ? preferredDismissHide : show;
+        UI.panelShowDismissed.querySelector(".ed11y-sr-only").textContent = UI.showDismissed ? preferredDismissHide : Lang._("buttonShowHiddenAlert");
         UI.panelShowDismissed.dataset.ed11yPressed = `${UI.showDismissed}`;
         if (!UI.english) {
           UI.panelShowDismissed.ariaPressed = UI.showDismissed;
         }
         UI.panelShowDismissed.removeAttribute("hidden");
       } else {
-        UI.panelShowDismissed.querySelector(".ed11y-sr-only").textContent = UI.showDismissed ? preferredDismissHide : Lang.sprintf("PANEL_DISMISS_BUTTON", UI.dismissedCount).textContent;
+        UI.panelShowDismissed.querySelector(".ed11y-sr-only").textContent = UI.showDismissed ? preferredDismissHide : Lang.sprintf(pluralKey("PANEL_DISMISS_BUTTON", UI.dismissedCount), UI.dismissedCount).textContent;
         UI.panelShowDismissed.dataset.ed11yPressed = `${UI.showDismissed}`;
         if (!UI.english) {
           UI.panelShowDismissed.ariaPressed = UI.showDismissed;
@@ -6001,7 +7459,10 @@ function updatePanel() {
       if (UI.dismissedCount > 0) {
         UI.panelCount.textContent = "i";
         if (!UI.showPanel) {
-          UI.panelToggleTitle.textContent = UI.dismissedCount > 1 ? Lang.sprintf("PANEL_DISMISS_BUTTON", UI.dismissedCount).textContent : Lang._("buttonShowHiddenAlert");
+          UI.panelToggleTitle.textContent = UI.dismissedCount > 1 ? Lang.sprintf(
+            pluralKey("PANEL_DISMISS_BUTTON", UI.dismissedCount),
+            UI.dismissedCount
+          ).textContent : Lang._("buttonShowHiddenAlert");
         }
       }
     }
@@ -6042,32 +7503,53 @@ function buildJumpList() {
   State.results.sort((a, b) => b.sortPos - a.sortPos);
   matchAdoptions();
   State.results?.forEach((result, i) => {
-    if (result.element && (!result.dismissalStatus || UI.showDismissed)) {
+    if (result.element && shouldDraw(result)) {
       drawResult(result, i);
     }
   });
   sweepOrphans();
   UI.jumpList.forEach((el, i) => {
     el.dataset.ed11yJumpPosition = `${i}`;
-    const newLabel = `${Lang._("ALERT_TEXT")} ${i + 1} / ${UI.jumpList.length - 1}, ${el.shadowRoot.querySelector(".toggle").getAttribute("aria-label")}`;
+    let oldLabel = el.shadowRoot.querySelector(".toggle").getAttribute("aria-label");
+    if (oldLabel?.includes(",")) {
+      oldLabel = oldLabel.split(",").slice(1).join(",").trim();
+    }
+    const newLabel = `${Lang._("ALERT_TEXT")} ${i + 1}, ${oldLabel}`;
     el.shadowRoot.querySelector(".toggle").setAttribute("aria-label", newLabel);
   });
   const tipsPainted = new CustomEvent("ed11yResultsPainted");
   document.dispatchEvent(tipsPainted);
   resumeObservers();
 }
-function dismissOne(dismissalType, test, dismissalKey) {
+function dispatchDismissalUpdate(dismissalType, test, dismissalKey, result) {
+  const dismissalDetail = {
+    dismissPage: State.option.currentPage,
+    dismissTest: test,
+    dismissKey: dismissalKey,
+    dismissAction: dismissalType,
+    dismissType: result?.type ?? null,
+    dismissData: result?.data ?? null
+  };
+  document.dispatchEvent(new CustomEvent("ed11yDismissalUpdate", { detail: dismissalDetail }));
+}
+function dismissOne(dismissalType, test, dismissalKey, result = null) {
   if (UI.dismissKeys[dismissalKey]) {
     dismissalKey = UI.dismissKeys[dismissalKey];
   }
+  const isLinkVerdict = applyLinkVerdict(result, dismissalType);
   if (dismissalType === "reset") {
-    delete UI.dismissedAlerts[State.option.currentPage][test][dismissalKey];
-    if (Object.keys(UI.dismissedAlerts[State.option.currentPage][test]).length === 0) {
-      delete UI.dismissedAlerts[State.option.currentPage][test];
+    const pageDismissals = UI.dismissedAlerts[State.option.currentPage];
+    if (pageDismissals?.[test]) {
+      delete pageDismissals[test][dismissalKey];
+      if (Object.keys(pageDismissals[test]).length === 0) {
+        delete pageDismissals[test];
+      }
     }
-    if (Object.keys(UI.dismissedAlerts[State.option.currentPage]).length === 0) {
+    if (pageDismissals && Object.keys(pageDismissals).length === 0) {
       delete UI.dismissedAlerts[State.option.currentPage];
     }
+  } else if (isLinkVerdict) {
+    UI.panelShowDismissed.removeAttribute("hidden");
   } else {
     const dismissal = {};
     dismissal[dismissalKey] = dismissalType;
@@ -6083,27 +7565,9 @@ function dismissOne(dismissalType, test, dismissalKey) {
     UI.panelShowDismissed.removeAttribute("hidden");
   }
   if (State.option.syncedDismissals === false) {
-    localStorage.setItem("ed11ydismissed", JSON.stringify(UI.dismissedAlerts));
+    store.setItem("ed11ydismissed", JSON.stringify(UI.dismissedAlerts));
   }
-  const dismissalDetail = {
-    dismissPage: State.option.currentPage,
-    dismissTest: test,
-    dismissKey: dismissalKey,
-    dismissAction: dismissalType
-  };
-  const ed11yDismissalUpdate = new CustomEvent("ed11yDismissalUpdate", { detail: dismissalDetail });
-  window.setTimeout(() => {
-    document.dispatchEvent(ed11yDismissalUpdate);
-  }, 100);
-}
-function updateFixedRootPositions() {
-  if (!State.option.fixedRoots) return;
-  UI.positionedFrames.length = 0;
-  State.option.fixedRoots.forEach((root) => {
-    if (root.framePositioner) {
-      UI.positionedFrames.push(root.framePositioner.getBoundingClientRect());
-    }
-  });
+  dispatchDismissalUpdate(dismissalType, test, dismissalKey, result);
 }
 function positionHighlight(el, target, result) {
   let targetOffset = target.getBoundingClientRect();
@@ -6111,11 +7575,13 @@ function positionHighlight(el, target, result) {
     const visibleParent = firstVisibleParent(target);
     if (visibleParent) targetOffset = visibleParent.getBoundingClientRect();
   }
-  const framePositioner = result.fixedRoot != null && UI.positionedFrames[result.fixedRoot] ? UI.positionedFrames[result.fixedRoot] : { top: 0, left: 0 };
-  el.style.setProperty("width", `${targetOffset.width + 6}px`);
-  el.style.setProperty("height", `${targetOffset.height + 6}px`);
-  el.style.setProperty("top", `${targetOffset.top + framePositioner.top + window.scrollY - 3}px`);
-  el.style.setProperty("left", `${targetOffset.left + framePositioner.left - 3}px`);
+  const frame = frameFor(result.fixedRoot);
+  const scale = frame.scale || 1;
+  const origin = alertOrigin();
+  el.style.setProperty("width", `${targetOffset.width * scale + 6}px`);
+  el.style.setProperty("height", `${targetOffset.height * scale + 6}px`);
+  el.style.setProperty("top", `${targetOffset.top * scale + frame.top - origin.top - 3}px`);
+  el.style.setProperty("left", `${targetOffset.left * scale + frame.left - origin.left - 3}px`);
 }
 function editableHighlighter(resultID, show, firstVisible) {
   const result = State.results[resultID];
@@ -6134,13 +7600,16 @@ function editableHighlighter(resultID, show, firstVisible) {
     el.classList.add("ed11y-element");
     el.style.setProperty("position", "absolute");
     el.style.setProperty("pointer-events", "none");
-    UI.panelAttachTo.appendChild(el);
+    alertContainer().appendChild(el);
     entry.highlight = el;
   }
   entry.highlightTarget = firstVisible || result.element;
   const zIndex = result.dismissalStatus ? "calc(var(--ed11y-buttonZIndex, 9999) - 2)" : "calc(var(--ed11y-buttonZIndex, 9999) - 1)";
   el.style.setProperty("z-index", zIndex);
-  const outline = result.type === "warning" ? "0 0 0 1px #fff, inset 0 0 0 2px var(--ed11y-warning, #fad859), 0 0 0 3px var(--ed11y-warning, #fad859), 0 0 0 4px var(--ed11y-primary)" : "0 0 0 1px #fff, inset 0 0 0 2px var(--ed11y-alert, #b80519), 0 0 0 3px var(--ed11y-alert, #b80519), 0 0 1px 3px";
+  let outline = "0 0 0 1px #fff, inset 0 0 0 2px var(--ed11y-alert, #b80519), 0 0 0 3px var(--ed11y-alert, #b80519), 0 0 1px 3px";
+  if (isWarningStyled(result)) {
+    outline = "0 0 0 1px #fff, inset 0 0 0 2px var(--ed11y-warning, #fad859), 0 0 0 3px var(--ed11y-warning, #fad859), 0 0 0 4px var(--ed11y-primary)";
+  }
   el.style.setProperty("box-shadow", outline);
   el.style.setProperty("border-radius", "3px");
   updateFixedRootPositions();
@@ -6202,8 +7671,13 @@ function paintReady() {
   for (const [key, value] of Object.entries(UI.theme)) {
     document.documentElement.style.setProperty(`--ed11y-${key}`, `${value}`);
   }
+  UI.baseFont.style.setProperty("visibility", "hidden");
+  UI.baseFont.style.setProperty("pointer-events", "none");
+  UI.baseFont.style.setProperty("width", "1rem");
+  UI.baseFont.ariaHidden = true;
+  document.documentElement.appendChild(UI.baseFont);
   if (document.querySelector("body")) {
-    UI.attachCSS(document.querySelector("body"));
+    UI.attachCSS(document);
   }
   UI.roots.forEach((root) => {
     if (State.option.shadowComponents) {
@@ -6227,7 +7701,7 @@ function alertOnInvisibleTip(button, target) {
       new CustomEvent("ed11yShowHidden", {
         detail: {
           result: button.getAttribute("data-ed11y-result"),
-          viaJump: UI.viaJump
+          viaJump: UI.viaJump === "jump"
         }
       })
     );
@@ -6255,7 +7729,7 @@ function alertOnInvisibleTip(button, target) {
         const tipAlert = UI.openTip.tip?.shadowRoot.querySelector(".invisible-alert");
         tipAlert.textContent = alertMessage;
       }
-      if (UI.viaJump) {
+      if (UI.viaJump === "jump") {
         const scrollPin = window.innerHeight > 900 || window.innerWidth > 800 && window.innerHeight > 600 ? "center" : "start";
         let scrollTarget = UI.inlineAlerts ? button2 : target2;
         if (button2.dataset.ed11yHiddenResult || !visible(scrollTarget)) {
@@ -6276,28 +7750,9 @@ function alertOnInvisibleTip(button, target) {
         }
       }
       const activeTip = document.querySelector('ed11y-element-tip[data-ed11y-open="true"]');
-      if (!activeTip) {
+      if (!activeTip && !button2.userClosed) {
         button2.setAttribute("data-ed11y-action", "open");
-        if (UI.viaJump) {
-          window.setTimeout(() => {
-            const activeTip2 = document.querySelector('ed11y-element-tip[data-ed11y-open="true"]');
-            if (UI.viaJump) {
-              activeTip2?.shadowRoot.querySelector(".title").focus();
-            }
-          }, 100);
-        }
-      } else {
-        if (UI.viaJump) {
-          window.setTimeout(
-            () => {
-              activeTip?.shadowRoot.querySelector(".title").focus();
-            },
-            100,
-            activeTip
-          );
-        }
       }
-      UI.viaJump = false;
     },
     delay,
     button,
@@ -6308,35 +7763,23 @@ function jumpTo(next = true) {
   if (!UI.showPanel) {
     return false;
   }
-  UI.viaJump = true;
-  const goMax = UI.jumpList.length - 1;
-  let goNum = next ? +UI.openJumpPosition + 1 : +UI.openJumpPosition - 1;
-  if (goNum < 0) {
-    goNum = goMax;
-    UI.nextText = `${Lang._("SKIP_TO_ISSUE")} 1`;
-  } else if (goNum > goMax) {
-    goNum = 0;
-    UI.nextText = `${Lang._("SKIP_TO_ISSUE")} ${goNum + 1}`;
-  } else {
-    let showNum = Number.isNaN(goNum) ? 2 : goNum + 2;
-    if (showNum > goMax + 1) {
-      showNum = 1;
-    }
-    UI.nextText = `${Lang._("SKIP_TO_ISSUE")} ${showNum}`;
-  }
-  UI.openJumpPosition = goNum;
-  window.setTimeout(() => {
-    UI.panelJumpNext.querySelector(".ed11y-sr-only").textContent = UI.nextText;
-  }, 250);
+  UI.viaJump = "jump";
   resetClass(["ed11y-hidden-highlight"]);
   if (UI.jumpList.length === 0) {
     buildJumpList();
   }
-  let goto = UI.jumpList[goNum];
-  if (!goto) {
-    goto = UI.jumpList[0];
-    UI.openJumpPosition = 0;
+  const count = UI.jumpList.length;
+  if (count === 0) {
+    return false;
   }
+  const current = Number.isInteger(+UI.openJumpPosition) ? +UI.openJumpPosition : -1;
+  const goNum = ((next ? current + 1 : current - 1) % count + count) % count;
+  UI.openJumpPosition = goNum;
+  const goto = UI.jumpList[goNum];
+  UI.nextText = `${Lang._("SKIP_TO_ISSUE")} ${(goNum + 1) % count + 1}`;
+  window.setTimeout(() => {
+    UI.panelJumpNext.querySelector(".ed11y-sr-only").textContent = UI.nextText;
+  }, 1e3);
   const result = goto.getAttribute("data-ed11y-result");
   const gotoResult = State.results[result];
   const target = gotoResult.element;
@@ -6355,19 +7798,21 @@ function jumpTo(next = true) {
   UI.scrollPending = 2;
   updateTipLocations();
 }
-let alignRafPending = false;
-function incrementalAlign() {
-  if (alignRafPending) return;
-  alignRafPending = true;
+let tipLocationsQueued = false;
+function queueTipLocations() {
+  if (tipLocationsQueued) return;
+  tipLocationsQueued = true;
   requestAnimationFrame(() => {
-    alignRafPending = false;
-    if (UI.running || UI.alignPending) {
-      incrementalAlign();
-      return;
-    }
-    UI.scrollPending++;
+    tipLocationsQueued = false;
     updateTipLocations();
   });
+}
+function incrementalAlign() {
+  UI.scrollPending = Math.max(UI.scrollPending, 1);
+  queueTipLocations();
+}
+function realign() {
+  incrementalAlign();
 }
 function alignTip(button, toolTip, recheck = 0, reveal = false) {
   if (!toolTip) {
@@ -6393,6 +7838,14 @@ function alignTip(button, toolTip, recheck = 0, reveal = false) {
       tip
     );
   }
+  let containWidth = window.innerWidth;
+  if (UI.baseFont && (containWidth < 20 * UI.baseFont.clientWidth || window.innerHeight < 20 * UI.baseFont.clientWidth)) {
+    tip.removeAttribute("style");
+    tip.classList.add("overflow");
+    return;
+  } else {
+    tip.classList.remove("overflow");
+  }
   const mark = button.getRootNode().host;
   const resultNum = button.dataset.ed11yResult;
   const result = State.results[resultNum];
@@ -6404,17 +7857,17 @@ function alignTip(button, toolTip, recheck = 0, reveal = false) {
   let buttonTop = buttonOffset.top + scrollTop;
   let containTop = scrollTop;
   let containLeft = 0;
-  let containWidth = window.innerWidth;
   let containBottom = window.innerHeight + scrollTop;
   let absoluteBottom = containBottom;
   if (!UI.inlineAlerts && result.scrollableParent) {
-    const bounds = result.scrollableParent.getBoundingClientRect();
+    updateFixedRootPositions();
+    const bounds = scrollBoundsFor(result);
     if (bounds.width > 0) {
       containLeft = Math.max(0, bounds.left);
       containWidth = Math.min(containWidth, bounds.width - 30);
       containBottom = bounds.bottom + scrollTop;
       containTop = bounds.top + scrollTop;
-      absoluteBottom = bounds.top + result.scrollableParent.scrollHeight;
+      absoluteBottom = bounds.top + result.scrollableParent.scrollHeight * (frameFor(result.fixedRoot).scale || 1);
     }
   } else if (mark.dataset.ed11yHiddenResult === "true" || !(visible(mark) || buttonOffset.top === 0 && buttonOffset.left === 0)) {
     const theFirstVisibleParent = firstVisibleParent(mark.result.element);
@@ -6432,8 +7885,19 @@ function alignTip(button, toolTip, recheck = 0, reveal = false) {
   const containRight = Math.min(window.innerWidth, containLeft + containWidth);
   const tipWidth = tip.offsetWidth;
   const tipHeight = tip.offsetHeight;
+  const footer = tip.querySelector(".footer");
+  const footerElements = tip.querySelectorAll(".footer > *");
+  let footerWidth = 0;
+  footerElements?.forEach((el) => {
+    footerWidth += el.clientWidth;
+  });
   toolTip.style.setProperty("top", `${buttonOffset.top + scrollTop}px`);
   toolTip.style.setProperty("left", `${buttonOffset.left + leftAdd}px`);
+  if (footerWidth > tipWidth + 5) {
+    footer.classList.add("overflow");
+  } else {
+    footer.classList.remove("overflow");
+  }
   let direction = "under";
   if (buttonTop === 0 && buttonLeft === 0) {
     direction = "whompWhomp";
@@ -6444,7 +7908,7 @@ function alignTip(button, toolTip, recheck = 0, reveal = false) {
       direction = "above";
     } else if (containLeft < buttonLeft - (buttonSize + tipWidth + 30) && containTop + tipHeight + 30 < containBottom) {
       direction = "left";
-    } else if (buttonTop + tipHeight + buttonSize > absoluteBottom) {
+    } else if (buttonTop + tipHeight + buttonSize > absoluteBottom && buttonTop - tipHeight > 0) {
       direction = "above";
     }
   }
@@ -6526,19 +7990,25 @@ function alignTip(button, toolTip, recheck = 0, reveal = false) {
   alignHighlights();
 }
 function updateTipLocations() {
-  if (!UI.scrollTicking && UI.scrollPending > 0 && !UI.running && UI.jumpList && UI.showPanel) {
+  if (!UI.showPanel || !UI.jumpList?.length) {
+    UI.scrollPending = 0;
+    return;
+  }
+  UI.scrollPending = Math.min(UI.scrollPending, 2);
+  if (!UI.scrollTicking && UI.scrollPending > 0 && !UI.running) {
     UI.scrollTicking = true;
-    alignButtons();
-    if (UI.tipOpen) {
-      alignTip(UI.openTip.button.shadowRoot.querySelector("button"), UI.openTip.tip);
+    try {
+      alignButtons();
+      if (UI.tipOpen) {
+        alignTip(UI.openTip.button.shadowRoot.querySelector("button"), UI.openTip.tip);
+      }
+    } finally {
+      UI.scrollTicking = false;
     }
     UI.scrollPending--;
   }
-  UI.scrollTicking = false;
   if (UI.scrollPending > 0) {
-    window.setTimeout(() => {
-      requestAnimationFrame(() => updateTipLocations());
-    }, 0);
+    queueTipLocations();
   }
 }
 function alignHighlights() {
@@ -6554,7 +8024,7 @@ const slowIncremental = lagBounce(() => {
   incrementalCheckDebounce();
 }, 500);
 function windowResize() {
-  if (UI.panel?.classList.contains("ed11y-active") === true) {
+  if (UI.panel !== false && UI.panel.classList?.contains("ed11y-active") === true) {
     alignAlts();
     alignButtons();
   }
@@ -6564,12 +8034,15 @@ function windowResize() {
   alignPanel();
 }
 const scrollWatch = (container) => {
+  const stampHost = typeof container.documentElement === "object" ? container.documentElement : container;
+  if (stampHost?.dataset?.ed11yScrollWatch === "true") return;
+  if (stampHost?.dataset) stampHost.dataset.ed11yScrollWatch = "true";
   container.addEventListener(
     "scroll",
     () => {
       if (!UI.inlineAlerts) {
-        UI.scrollPending = UI.scrollPending < 2 ? UI.scrollPending + 1 : UI.scrollPending;
-        requestAnimationFrame(() => updateTipLocations());
+        UI.scrollPending = Math.min(UI.scrollPending + 1, 2);
+        queueTipLocations();
       } else if (UI.tipOpen) {
         alignTip(UI.openTip.button.shadowRoot.querySelector("button"), UI.openTip.tip);
       }
@@ -6579,34 +8052,62 @@ const scrollWatch = (container) => {
     }
   );
 };
+const attachIntegrationListeners = (doc) => {
+  if (!doc || doc.documentElement?.dataset?.ed11yIntegrationListeners === "true") return;
+  doc.documentElement.dataset.ed11yIntegrationListeners = "true";
+  doc.addEventListener(
+    "keydown",
+    () => {
+      UI.interaction = true;
+    },
+    { passive: true }
+  );
+  doc.addEventListener(
+    "click",
+    () => {
+      UI.interaction = true;
+    },
+    { passive: true }
+  );
+  doc.addEventListener(
+    "selectionchange",
+    () => {
+      if (!UI.running) {
+        selectionChanged(doc);
+      }
+    },
+    { passive: true }
+  );
+};
 function intersectionObservers() {
   Elements.Found.editable?.forEach((editable) => {
     scrollWatch(editable);
   });
   scrollWatch(document);
-  document.addEventListener(
-    "selectionchange",
-    () => {
-      if (!UI.running) {
-        selectionChanged();
+  attachIntegrationListeners(document);
+  if (Array.isArray(State.option.fixedRoots)) {
+    State.option.fixedRoots.forEach((root) => {
+      const foreignDoc = root?.ownerDocument;
+      if (foreignDoc && foreignDoc !== document) {
+        scrollWatch(foreignDoc);
+        attachIntegrationListeners(foreignDoc);
       }
-    },
-    {
-      passive: true
-    }
-  );
+    });
+  }
 }
-const selectionChanged = lagBounce(() => {
-  if (rangeChange()) {
+const selectionChanged = lagBounce((doc = document) => {
+  if (rangeChange(null, doc)) {
     updateTipLocations();
     checkEditableIntersects();
   }
 }, 100);
-function rangeChange(anchorNode) {
-  let anchor = window.getSelection()?.anchorNode;
+function rangeChange(anchorNode, doc = document) {
+  const selection = doc && typeof doc.getSelection === "function" ? doc.getSelection() : window.getSelection();
+  let anchor = selection?.anchorNode;
   const expandable = anchor?.parentNode && typeof anchor.parentNode === "object" && typeof anchor.parentNode.matches === "function";
   if (!anchor || expandable && (Array.prototype.includes.call(UI.roots, anchor.parentNode) || anchor.parentNode.matches('div[contenteditable="true"]'))) {
     UI.activeRange = false;
+    UI.activeRangeFrame = false;
     return false;
   }
   if (expandable) {
@@ -6615,7 +8116,7 @@ function rangeChange(anchorNode) {
       anchor = textParent;
     }
   }
-  const range = document.createRange();
+  const range = (anchor.ownerDocument || document).createRange();
   if (typeof anchor === "object") {
     range.setStartBefore(anchor);
     range.setEndAfter(anchor);
@@ -6623,6 +8124,7 @@ function rangeChange(anchorNode) {
   if (typeof range !== "object" || typeof range.getBoundingClientRect !== "function") {
     if (UI.activeRange) {
       UI.activeRange = false;
+      UI.activeRangeFrame = false;
       return true;
     } else {
       return false;
@@ -6630,6 +8132,9 @@ function rangeChange(anchorNode) {
   } else {
     const sameRange = UI.activeRange && range.startContainer === UI.activeRange.startContainer && range.startOffset === UI.activeRange.startOffset;
     UI.activeRange = range;
+    const anchorEl = anchor.nodeType === 1 ? anchor : anchor.parentElement;
+    const activeRoot = anchorEl?.closest?.("[data-ed11y-root]");
+    UI.activeRangeFrame = activeRoot ? activeRoot.dataset.ed11yRoot : false;
     return !sameRange;
   }
 }
@@ -6738,34 +8243,51 @@ function startObserver(root) {
     updateTipLocations();
   }, 1e3);
 }
-const safeRun = (fn) => {
+function failRun(error) {
+  showError(error);
+  UI.running = false;
+  UI.incrementalRetryPending = false;
+  UI.forceFullCheck = true;
+  try {
+    watchForEdits();
+  } catch (watchError) {
+    console.error("Editoria11y:", watchError);
+  }
+  resumeObservers();
+}
+const safeRun = (fn, name) => {
+  const start = performance.now();
   try {
     fn();
   } catch (error) {
     showError(error);
   }
+  UI.runTimings[name] = performance.now() - start;
 };
 const enqueueTests = (queue) => {
   const test = queue.pop();
   switch (test) {
     case "group1":
-      safeRun(checkHeaders);
-      safeRun(checkImages);
-      safeRun(checkEmbeddedContent);
-      safeRun(checkCustomRuleset);
-      safeRun(checkQA);
+      safeRun(checkHeaders, "checkHeaders");
+      safeRun(checkImages, "checkImages");
+      safeRun(checkEmbeddedContent, "checkEmbeddedContent");
+      safeRun(checkCustomRuleset, "checkCustomRuleset");
+      safeRun(checkQA, "checkQA");
       break;
     case "group2":
-      safeRun(checkLinkText);
+      safeRun(checkLinkText, "checkLinkText");
       break;
     case "checkLabels":
-      safeRun(checkLabels);
+      safeRun(checkLabels, "checkLabels");
       break;
     case "checkContrast":
-      safeRun(checkContrast);
+      safeRun(checkContrast, "checkContrast");
       break;
     case "checkDeveloper":
-      safeRun(checkDeveloper);
+      safeRun(checkDeveloper, "checkDeveloper");
+      break;
+    case "checkBrokenLinks":
+      safeRun(checkBrokenLinks, "checkBrokenLinks");
       break;
   }
   UI.testsRemaining--;
@@ -6775,7 +8297,11 @@ const enqueueTests = (queue) => {
     } else {
       window.setTimeout(
         (queue2) => {
-          enqueueTests(queue2);
+          try {
+            enqueueTests(queue2);
+          } catch (error) {
+            failRun(error);
+          }
         },
         0,
         queue
@@ -6795,25 +8321,45 @@ function removeCustomTest() {
     continueCheck().then();
   }
   if (State.option.customTests === 0) {
-    document.removeEventListener("ed11yResume", () => {
-      UI.customTestsRemaining--;
-      if (UI.testsRemaining === 0 && UI.customTestsRemaining === 0) {
-        continueCheck().then();
-      }
-    });
+    document.removeEventListener("ed11yResume", onCustomTestResume);
+  }
+}
+function onCustomTestResume(event) {
+  const runId = event?.detail?.runId;
+  if (runId !== void 0 && runId !== null && Number(runId) !== UI.runGen) {
+    return;
+  }
+  if (UI.customTestsRemaining <= 0) {
+    return;
+  }
+  UI.customTestsRemaining--;
+  if (UI.testsRemaining === 0 && UI.customTestsRemaining === 0) {
+    continueCheck().then();
   }
 }
 UI.testsRemaining = 0;
 function checkAll() {
-  if (UI.tipOpen) {
+  try {
+    return startRun();
+  } catch (error) {
+    failRun(error);
     return false;
   }
+}
+function startRun() {
+  if (UI.tipOpen) {
+    UI.running = false;
+    return false;
+  }
+  resetCaches();
+  UI.runTimings = {};
   UI.runGen = UI.runGen + 1 | 0;
   UI.activeRunGen = UI.runGen;
   UI.disabled = false;
   if (checkRunPrevent()) {
     disable();
   }
+  UI.running = true;
   UI.customTestsRunning = false;
   if (UI.splitConfiguration.active) {
     Object.assign(State.option, UI.splitConfiguration.devOptions);
@@ -6838,7 +8384,9 @@ function checkAll() {
   }
   State.results.length = 0;
   UI.splitConfiguration.devResults.length = 0;
+  const buildStart = performance.now();
   buildElementList();
+  UI.runTimings.buildElementList = performance.now() - buildStart;
   const queue = ["group1", "group2"];
   if (State.option.formLabelsPlugin) {
     queue.push("checkLabels");
@@ -6849,10 +8397,15 @@ function checkAll() {
   if (State.option.contrastPlugin) {
     queue.push("checkContrast");
   }
+  if (State.option.brokenLinks?.length) {
+    queue.push("checkBrokenLinks");
+  }
   UI.testsRemaining = queue.length;
   if (State.option.customTests > 0) {
     UI.customTestsRemaining = State.option.customTests;
-    const customTests = new CustomEvent("ed11yRunCustomTests");
+    const customTests = new CustomEvent("ed11yRunCustomTests", {
+      detail: { runId: UI.runGen }
+    });
     document.dispatchEvent(customTests);
     window.clearTimeout(UI.customTestTimeout);
     const customTestRace = performance.now();
@@ -6871,6 +8424,17 @@ function checkAll() {
 }
 async function continueCheck() {
   const runGenAtDispatch = UI.runGen;
+  try {
+    await finishRun(runGenAtDispatch);
+  } catch (error) {
+    if (UI.runGen === runGenAtDispatch) {
+      failRun(error);
+    } else {
+      showError(error);
+    }
+  }
+}
+async function finishRun(runGenAtDispatch) {
   if (UI.splitConfiguration.active && State.results.length > 0) {
     await handleSyncOnlyResults();
   } else {
@@ -6895,27 +8459,29 @@ async function continueCheck() {
     showAltPanel();
   }
   updatePanel();
-  window.setTimeout(() => {
-    if (State.option.watchForChanges) {
-      Elements.Found.editable?.forEach((editable) => {
-        if (!editable.matches(".drag-observe")) {
-          editable.classList.add("drag-observe");
-          editable.addEventListener("drop", () => {
-            UI.forceFullCheck = true;
-            incrementalCheckDebounce();
-          });
-        }
+  window.setTimeout(watchForEdits, 0);
+}
+function watchForEdits() {
+  if (!State.option.watchForChanges) {
+    return;
+  }
+  Elements.Found.editable?.forEach((editable) => {
+    if (!editable.matches(".drag-observe")) {
+      editable.classList.add("drag-observe");
+      editable.addEventListener("drop", () => {
+        UI.forceFullCheck = true;
+        incrementalCheckDebounce();
       });
-      if (State.option.watchForChanges === "checkRoots") {
-        UI.roots?.forEach((root) => {
-          startObserver(root);
-        });
-      } else {
-        startObserver(document.body);
-      }
-      resumeObservers();
     }
-  }, 0);
+  });
+  if (State.option.watchForChanges === "checkRoots") {
+    UI.roots?.forEach((root) => {
+      startObserver(root);
+    });
+  } else {
+    startObserver(document.body);
+  }
+  resumeObservers();
 }
 function incrementalCheck() {
   if (!UI.running) {
@@ -6929,7 +8495,6 @@ function incrementalCheck() {
     }
     UI.interaction = false;
     UI.running = true;
-    resetGetText();
     let runTime = performance.now();
     UI.incremental = true;
     if (UI.disabled && UI.closedByDisable) {
@@ -6959,45 +8524,96 @@ const incrementalCheckDebounce = lagBounce(() => {
 function refresh() {
   incrementalCheckDebounce();
 }
+function setAlertAttachTo(container) {
+  State.option.alertAttachTo = resolveAlertAttachTo(container);
+  const target = alertContainer();
+  for (const entry of UI.markRegistry) {
+    if (!UI.inlineAlerts && entry.button?.isConnected) {
+      target.append(entry.button);
+    }
+    if (entry.highlight?.isConnected) {
+      target.append(entry.highlight);
+    }
+  }
+  realign();
+}
+function setFixedRoots(newFixedRoots, newFramePositioners, newEditableContent) {
+  State.option.fixedRoots = Array.isArray(newFixedRoots) && newFixedRoots.length > 0 ? newFixedRoots : false;
+  State.option.framePositioners = Array.isArray(newFramePositioners) && newFramePositioners.length > 0 ? newFramePositioners : false;
+  if (typeof newEditableContent !== "undefined") {
+    State.option.editableContent = newEditableContent;
+  }
+  if (Array.isArray(newFixedRoots)) {
+    newFixedRoots.forEach((root) => {
+      const foreignDoc = root?.ownerDocument;
+      if (foreignDoc && foreignDoc !== document) {
+        attachIntegrationListeners(foreignDoc);
+      }
+    });
+  }
+  UI.forceFullCheck = true;
+  refresh();
+}
 function resetPanel() {
   UI.visualizing = true;
   visualize();
   if (UI.totalCount === 0 && UI.dismissedCount > 0) {
     UI.panelCount.textContent = "i";
-    UI.panelToggleTitle.textContent = UI.dismissedCount === 1 ? Lang._("buttonShowHiddenAlert") : Lang.sprintf("PANEL_DISMISS_BUTTON", UI.dismissedCount).textContent;
+    UI.panelToggleTitle.textContent = UI.dismissedCount === 1 ? Lang._("buttonShowHiddenAlert") : Lang.sprintf(pluralKey("PANEL_DISMISS_BUTTON", UI.dismissedCount), UI.dismissedCount).textContent;
   }
   if (typeof UI.panel === "object") {
-    UI.panel?.classList.add("ed11y-shut");
-    UI.panel?.classList.remove("ed11y-active");
+    UI.panel.classList.add("ed11y-shut");
+    UI.panel.classList.remove("ed11y-active");
     UI.panelToggle.ariaExpanded = false;
     if (!UI.showDismissed && typeof UI.panelShowDismissed === "function") {
       UI.panelShowDismissed.setAttribute("data-ed11y-pressed", "false");
-      UI.panelShowDismissed.querySelector(".ed11y-sr-only").textContent = UI.dismissedCount === 1 ? Lang._("buttonShowHiddenAlert") : Lang.sprintf("PANEL_DISMISS_BUTTON", UI.dismissedCount).textContent;
+      UI.panelShowDismissed.querySelector(".ed11y-sr-only").textContent = UI.dismissedCount === 1 ? Lang._("buttonShowHiddenAlert") : Lang.sprintf(pluralKey("PANEL_DISMISS_BUTTON", UI.dismissedCount), UI.dismissedCount).textContent;
     }
   }
+}
+function repaintAfterVisualizerToggle() {
+  if (!State.results.some((result) => isVisualizerOnly(result))) {
+    return;
+  }
+  UI.forceFullCheck = true;
+  UI.showPanel = true;
+  resetResults();
+  incrementalCheck();
 }
 window.addEventListener("ed11yEndVisualization", () => {
   UI.visualizing = false;
   pauseObservers();
   visualize();
   resumeObservers();
+  repaintAfterVisualizerToggle();
 });
 function dismissThis(dismissalType, button) {
   const tip = button.closest(".ed11y-wrapper");
   const test = tip.querySelector("[data-test]").dataset.test;
   const dismissKey = tip.dataset.ed11yDismiss;
-  if (button.dataset.ed11yAll === "true") {
+  const tipResult = tip.getRootNode()?.host?.result ?? null;
+  UI.runOrigin = "dismissal";
+  if (dismissalType === "broken") {
+    applyLinkVerdict(tipResult, dismissalType);
+    dispatchDismissalUpdate(dismissalType, test, dismissKey, tipResult);
+  } else if (button.dataset.ed11yAll === "true") {
     State.results.forEach((result) => {
       if (result.test === test && (!result.dismissalStatus || result.dismissalStatus !== dismissalType)) {
-        dismissOne(dismissalType, test, result.dismiss);
+        dismissOne(dismissalType, test, result.dismiss, result);
       }
     });
   } else {
-    dismissOne(dismissalType, test, dismissKey);
+    dismissOne(dismissalType, test, dismissKey, tipResult);
   }
+  pauseObservers();
   reset();
+  const toClear = tip?.getRootNode()?.host;
+  if (toClear) {
+    toClear.remove();
+  }
   UI.showPanel = true;
   checkAll();
+  resumeObservers();
   const rememberGoto = UI.openJumpPosition;
   window.setTimeout(
     () => {
@@ -7011,17 +8627,21 @@ function dismissThis(dismissalType, button) {
       }
     },
     500,
-    rememberGoto
+    rememberGoto,
+    tip
   );
 }
-function toggleShowDismissals() {
+function setShowDismissals(show) {
   UI.ignoreAll = false;
-  UI.showDismissed = !UI.showDismissed;
+  UI.showDismissed = show;
   UI.forceFullCheck = true;
   UI.showPanel = true;
   resetResults();
   incrementalCheck();
   UI.panelShowDismissed.setAttribute("data-ed11y-pressed", `${UI.showDismissed}`);
+}
+function toggleShowDismissals() {
+  setShowDismissals(!UI.showDismissed);
   window.setTimeout(() => {
     UI.panelShowDismissed.focus();
   }, 0);
@@ -7042,13 +8662,13 @@ function togglePanel() {
         }
         checkAll();
         State.option.userPrefersShut = false;
-        localStorage.setItem("editoria11yShow", "1");
+        store.setItem("editoria11yShow", "1");
       } else {
         UI.showDismissed = false;
         UI.showPanel = false;
         reset();
         State.option.userPrefersShut = true;
-        localStorage.setItem("editoria11yShow", "0");
+        store.setItem("editoria11yShow", "0");
       }
       panelLabel();
     }
@@ -7092,8 +8712,8 @@ function disable() {
   document.documentElement.style.setProperty("--ed11y-activeColor", UI.theme.panelBarText);
   document.documentElement.style.setProperty("--ed11y-activeBorder", `${UI.theme.panelBarText}44`);
   document.documentElement.style.setProperty("--ed11y-activePanelBorder", "transparent");
-  if (typeof UI.panelToggle.querySelector === "function") {
-    UI.panel?.classList.remove("ed11y-errors", "ed11y-warnings");
+  if (UI.panel !== false && typeof UI.panelToggle.querySelector === "function") {
+    UI.panel.classList.remove("ed11y-errors", "ed11y-warnings");
     UI.panelCount.textContent = "i";
     UI.panelJumpNext.setAttribute("hidden", "");
     UI.panelToggle.classList.add("disabled");
@@ -7104,6 +8724,7 @@ function reset() {
   pauseObservers();
   resetResults();
   resetPanel();
+  resetCaches();
   UI.incremental = false;
   UI.running = false;
   UI.showPanel = false;
@@ -7133,7 +8754,7 @@ class Ed11yElementAlt extends HTMLElement {
         altSpan.classList.add(`ed11y-pass`);
       }
       altTextWrapper.appendChild(altSpan);
-      UI.attachCSS(altTextWrapper);
+      UI.attachCSS(shadow);
       shadow.appendChild(altTextWrapper);
       this.initialized = true;
     }
@@ -7151,7 +8772,7 @@ class Ed11yElementResult extends HTMLElement {
   handleHover(event) {
     event.preventDefault();
     const host = this.getRootNode().host;
-    if (!this.classList.contains("intersecting") && host.open !== true && host.racing === false) {
+    if (!this.classList.contains("intersecting") && host.open !== true && host.racing === false && window.innerWidth > 320) {
       this.open = true;
       host.racing = true;
       host.toggleTip(true);
@@ -7174,18 +8795,16 @@ class Ed11yElementResult extends HTMLElement {
   }
   toggleClick(event) {
     event.preventDefault();
+    UI.viaJump = "toggle";
     const host = this.getRootNode().host;
     if (host.racing === false) {
       host.racing = true;
       UI.toggledFrom = this;
       const stateChange = host.getAttribute("data-ed11y-open") === "false" ? "open" : "close";
-      host.setAttribute("data-ed11y-action", stateChange);
-      if (stateChange === "open") {
-        window.setTimeout(() => {
-          const activeTip = document.querySelector('ed11y-element-tip[data-ed11y-open="true"]');
-          activeTip?.shadowRoot.querySelector(".title").focus();
-        }, 500);
+      if (stateChange === "close") {
+        host.userClosed = true;
       }
+      host.setAttribute("data-ed11y-action", stateChange);
       window.setTimeout(
         () => {
           host.racing = false;
@@ -7195,8 +8814,8 @@ class Ed11yElementResult extends HTMLElement {
       );
     }
   }
-  closeOtherTips() {
-    if (UI.tipOpen) {
+  closeOtherTips(tip) {
+    if (UI.tipOpen && UI.openTip.button !== tip) {
       UI.openTip.button.setAttribute("data-ed11y-action", "close");
     }
   }
@@ -7214,8 +8833,7 @@ class Ed11yElementResult extends HTMLElement {
     if (this.tipNeedsBuild) {
       this.buildTip();
     }
-    this.toggle.setAttribute("aria-expanded", changeTo);
-    const highlightOutline = this.dismissable ? "ed11y-ring-yellow" : "ed11y-ring-red";
+    const highlightOutline = isWarningStyled(this.result) ? "ed11y-ring-yellow" : "ed11y-ring-red";
     if (UI.inlineAlerts) {
       resetClass([
         "ed11y-hidden-highlight",
@@ -7230,6 +8848,7 @@ class Ed11yElementResult extends HTMLElement {
       editableHighlighter(this.resultID, changeTo);
     }
     if (changeTo === true) {
+      this.userClosed = false;
       this.tip.style.setProperty("opacity", "0");
       document.dispatchEvent(
         new CustomEvent("ed11yPop", {
@@ -7240,7 +8859,20 @@ class Ed11yElementResult extends HTMLElement {
           }
         })
       );
-      this.closeOtherTips();
+      if (UI.viaJump) {
+        window.setTimeout(() => {
+          if (UI.openTip.tip === this.tip) {
+            this.tip.shadowRoot.querySelector(".close")?.focus();
+          }
+        }, 500);
+      }
+      UI.viaJump = false;
+      this.closeOtherTips(this);
+      UI.tipOpen = true;
+      UI.openTip = {
+        button: this,
+        tip: this.tip
+      };
       this.tip.setAttribute("data-ed11y-action", "open");
       if (UI.inlineAlerts) {
         this.result.element.classList.add(highlightOutline);
@@ -7251,11 +8883,6 @@ class Ed11yElementResult extends HTMLElement {
         buildJumpList();
       }
       UI.openJumpPosition = Number(this.getAttribute("data-ed11y-jump-position"));
-      UI.tipOpen = true;
-      UI.openTip = {
-        button: this,
-        tip: this.tip
-      };
       this.result.highlight?.style.setProperty("opacity", "1");
     } else {
       document.dispatchEvent(
@@ -7349,18 +8976,22 @@ class Ed11yElementPanel extends HTMLElement {
       panelTabs.forEach((tab) => {
         tab.addEventListener("click", this.handleBarClick);
       });
-      const altDetails = wrapper.querySelector("#ed11y-alts-tab");
-      const headingDetails = wrapper.querySelector("#ed11y-headings-tab");
-      altDetails.addEventListener("toggle", () => {
-        if (altDetails.open && headingDetails.open) {
-          headingDetails.removeAttribute("open");
-        }
-      });
-      headingDetails.addEventListener("toggle", () => {
-        if (altDetails.open && headingDetails.open) {
-          altDetails.removeAttribute("open");
-        }
-      });
+      const visualizers = wrapper.querySelector("#ed11y-visualizers");
+      visualizers.addEventListener(
+        "toggle",
+        (event) => {
+          const opened = event.target;
+          if (!opened.open || opened.parentElement !== visualizers) {
+            return;
+          }
+          visualizers.querySelectorAll(":scope > details[open]").forEach((details) => {
+            if (details !== opened) {
+              details.removeAttribute("open");
+            }
+          });
+        },
+        true
+      );
       this.initialized = true;
     }
   }
@@ -7380,9 +9011,11 @@ class Ed11yElementPanel extends HTMLElement {
           togglePanel();
           window.setTimeout(() => {
             visualize();
+            repaintAfterVisualizerToggle();
           }, 500);
         } else {
           visualize();
+          repaintAfterVisualizerToggle();
         }
         break;
     }
@@ -7663,20 +9296,17 @@ class Ed11yElementTip extends HTMLElement {
     this.style.setProperty("outline", "0px solid transparent");
     const shadow = this.attachShadow({ mode: "open" });
     this.issueIndex = Number.parseInt(this.result.toggle.dataset.ed11yJumpPosition, 10);
-    this.issueNext = this.issueIndex < UI.jumpList.length - 1 ? this.issueIndex + 2 : 1;
-    this.issuePrev = this.issueIndex > 0 ? this.issueIndex : UI.jumpList.length;
     this.dismissable = this.result.type !== "error";
     this.dismissed = !!this.result.dismissalStatus;
-    this.wrapper = document.createElement("div");
-    this.wrapper.setAttribute("role", "dialog");
+    this.isLink = isLinkResult(this.result);
+    let badge = this.dismissable ? Lang._("WARNING") : Lang._("ERROR");
+    if (this.isLink) {
+      badge = this.dismissed ? Lang._("linkHiddenBadge") : Lang._(linkTypes[this.result.type].badge);
+    }
+    this.wrapper = document.createElement("dialog");
     this.wrapper.dataset.ed11yDismiss = this.result.dismiss;
     this.wrapper.classList.add("ed11y-tip-wrapper", "ed11y-wrapper");
     this.wrapper.style.setProperty("opacity", "0");
-    this.wrapper.setAttribute(
-      "aria-label",
-      `${Lang._("ALERT_TEXT")}
-        ${this.issueIndex + 1}`
-    );
     this.wrapper.innerHTML = `
 		<div class="tip">
 			<button class="close ed11y-tip-close">${sprite.close}</button>
@@ -7688,7 +9318,7 @@ class Ed11yElementTip extends HTMLElement {
 				</div>
 			</div>
 			<div class="footer">
-				<div class="error-badge">${this.dismissable ? Lang._("WARNING") : Lang._("ERROR")}</div>
+				<div class="error-badge">${badge}</div>
 				<div class="ed11y-tip-dismissals">
 					<details class="ed11y-bulk-actions dismiss ed11y-hidden"><summary></summary><div class="ed11y-bulk-actions-content"></div></details>
 				</div>
@@ -7697,13 +9327,22 @@ class Ed11yElementTip extends HTMLElement {
 		</div>
 		`;
     this.wrapper.querySelector(".content").dataset.test = this.result.test;
+    if (this.isLink) {
+      this.wrapper.querySelector(".error-badge").classList.add("ed11y-link", linkTypes[this.result.type].className);
+    }
     this.addEventListener("mouseover", this.handleHover, {
       passive: true
     });
-    UI.attachCSS(this.wrapper);
+    UI.attachCSS(shadow);
     this.tip = this.wrapper.querySelector(".tip");
     const content = this.wrapper.querySelector(".message");
-    if (this.result.content.querySelector(".title")) {
+    if (typeof this.result.content === "string") {
+      const wrapped = document.createElement("div");
+      wrapped.innerHTML = this.result.content;
+      this.result.content = wrapped;
+    }
+    let contentTitle = this.result.content.querySelector(".title");
+    if (contentTitle) {
       content.appendChild(this.result.content);
       const sallyTips = content.querySelectorAll("hr, hr ~ *");
       if (sallyTips) {
@@ -7718,19 +9357,21 @@ class Ed11yElementTip extends HTMLElement {
       }
     } else {
       const innerContent = document.createElement("div");
-      const firstSentence = document.createElement("div");
-      firstSentence.classList.add("title");
-      firstSentence.setAttribute("tabindex", "-1");
-      firstSentence.style.setProperty("position", "absolute");
-      innerContent.append(firstSentence);
+      contentTitle = document.createElement("div");
+      contentTitle.classList.add("title");
+      contentTitle.setAttribute("tabindex", "-1");
+      contentTitle.style.setProperty("position", "absolute");
+      innerContent.append(contentTitle);
       innerContent.appendChild(this.result.content);
       content.append(innerContent);
       console.warn(`Editoria11y tip title not found for ${this.result.test}.`);
     }
-    const title = content.querySelector(".title");
     const invisibleAlert = document.createElement("div");
     invisibleAlert.classList.add("invisible-alert");
-    title.append(invisibleAlert);
+    contentTitle.append(invisibleAlert);
+    UI.uniqueId++;
+    contentTitle.setAttribute("id", `ed11y-title-${UI.uniqueId}`);
+    this.wrapper.setAttribute("aria-labelledby", `ed11y-title-${UI.uniqueId}`);
     if (this.result.contrastDetails) {
       const contrastDiv = document.createElement("div");
       contrastDiv.classList.add("ed11y-contrast-tools");
@@ -7772,8 +9413,10 @@ class Ed11yElementTip extends HTMLElement {
       const dismissIcon = document.createElement("span");
       dismissIcon.classList.add("ed11y-dismiss-icon");
       dismissIcon.innerHTML = sprite.dismiss;
-      if (UI.showDismissed && this.dismissed) {
-        const okd = UI.dismissedAlerts[State.option.currentPage][this.result.test][this.result.dismiss] === "ok";
+      if (this.isLink) {
+        this.drawLinkActions(buttonBar, dismissIcon);
+      } else if (UI.showDismissed && this.dismissed) {
+        const okd = this.result.dismissalStatus === "ok";
         if (okd && State.option.allowOK || !okd) {
           const unDismissButton = document.createElement("button");
           const unDismissIcon = document.createElement("span");
@@ -7886,13 +9529,13 @@ class Ed11yElementTip extends HTMLElement {
     }
     if (UI.jumpList.length > 1) {
       this.prev = this.wrapper.querySelector(".prev");
-      this.prev.setAttribute("title", `${Lang._("SKIP_TO_ISSUE")} ${this.issuePrev}`);
+      this.prev.setAttribute("aria-label", Lang._("buttonPrev"));
       this.prev.addEventListener("click", (event) => {
         event.preventDefault();
         jumpTo(false);
       });
       this.next = this.wrapper.querySelector(".next");
-      this.next.setAttribute("title", `${Lang._("SKIP_TO_ISSUE")} ${this.issueNext}`);
+      this.next.setAttribute("aria-label", Lang._("buttonNext"));
       this.next.addEventListener("click", (event) => {
         event.preventDefault();
         jumpTo();
@@ -7909,36 +9552,133 @@ class Ed11yElementTip extends HTMLElement {
           UI.toggledFrom.focus();
         }
         this.setAttribute("data-ed11y-action", "shut");
-        this.result?.toggle?.setAttribute("data-ed11y-action", "shut");
+        if (this.result?.toggle) {
+          this.result.toggle.userClosed = true;
+          this.result.toggle.setAttribute("data-ed11y-action", "shut");
+        }
       }
     });
     this._handleDocumentClick = (event) => {
       if (this.open && !event.target.closest(".ed11y-element")) {
         const toggle = getElements('ed11y-element-result[data-ed11y-open="true"]', "document", []);
+        if (toggle[0] && event.isTrusted) {
+          toggle[0].userClosed = true;
+        }
         toggle[0]?.setAttribute("data-ed11y-action", "shut");
         this.setAttribute("data-ed11y-action", "shut");
       }
     };
     document.addEventListener("click", this._handleDocumentClick);
-    shadow.appendChild(this.wrapper);
-    const focusLoopLeft = document.createElement("div");
-    focusLoopLeft.setAttribute("tabIndex", "0");
-    const focusLoopRight = document.createElement("div");
-    focusLoopRight.setAttribute("tabindex", "0");
-    this.wrapper.appendChild(focusLoopLeft);
     this.wrapper.appendChild(arrow);
     this.wrapper.appendChild(this.tip);
-    this.wrapper.appendChild(focusLoopRight);
-    const focusables = this.wrapper.querySelectorAll('a, button, [tabindex="0"]');
-    const count = focusables.length;
-    focusables[0].addEventListener("focus", () => {
-      focusables[count - 2].focus();
-    });
-    focusables[count - 1].addEventListener("focus", () => {
-      focusables[1].focus();
-    });
+    shadow.appendChild(this.wrapper);
+    focusLoop(this.wrapper);
     this.initialized = true;
     this.rendering = false;
+  }
+  // Link-check results offer only the verdicts that would change anything.
+  // No bulk actions: each link target is its own decision.
+  //
+  //   broken (type "link")        Mark OK, or Ignore for users who may not
+  //                               mark things OK.
+  //   manual check ("linkManual") Mark OK or Ignore, plus Mark broken.
+  //   marked OK (dismissalStatus  Restore, which clears the mark so the
+  //   "ok", shown with hidden     checker decides again.
+  //   alerts)
+  //   ignored ("hide")            Restore, as for any ignored alert.
+  //
+  // Mark OK and Mark broken are site-wide marks on the link, so a site may
+  // grant them separately from the page-level allowOK option through
+  // allowLinkMarks.
+  drawLinkActions(buttonBar, dismissIcon) {
+    const allowMark = linkMarksAllowed();
+    const makeButton = (classes, text, title, icon) => {
+      const button = document.createElement("button");
+      button.classList.add("dismiss", ...classes);
+      if (title && State.option.syncedDismissals) {
+        button.setAttribute("title", title);
+      }
+      const label = document.createElement("span");
+      label.classList.add("text");
+      label.textContent = text;
+      button.append(label);
+      button.prepend(icon);
+      button.dataset.ed11yAll = "false";
+      return button;
+    };
+    const markBroken = () => {
+      const brokenIcon = document.createElement("span");
+      brokenIcon.classList.add("ed11y-dismiss-icon");
+      brokenIcon.innerHTML = sprite.linkBroken;
+      const brokenButton = makeButton(
+        ["broken"],
+        Lang._("dismissBrokenButton"),
+        Lang._("dismissBrokenTitle"),
+        brokenIcon
+      );
+      brokenButton.addEventListener("click", (e) => {
+        dismissThis("broken", e.target.closest("button"));
+      });
+      buttonBar.append(brokenButton);
+    };
+    if (this.result.dismissalStatus === "hide") {
+      const restoreIcon = document.createElement("span");
+      restoreIcon.classList.add("ed11y-dismiss-icon");
+      restoreIcon.innerHTML = sprite.unDismiss;
+      const restoreButton = makeButton([], Lang._("unDismissHideButton"), null, restoreIcon);
+      restoreButton.addEventListener("click", (e) => {
+        dismissThis("reset", e.target.closest("button"));
+      });
+      buttonBar.append(restoreButton);
+      return;
+    }
+    if (this.result.dismissalStatus === "ok") {
+      if (allowMark) {
+        const restoreIcon = document.createElement("span");
+        restoreIcon.classList.add("ed11y-dismiss-icon");
+        restoreIcon.innerHTML = sprite.unDismiss;
+        const restoreButton = makeButton([], Lang._("unDismissOKButton"), null, restoreIcon);
+        restoreButton.addEventListener("click", (e) => {
+          dismissThis("reset", e.target.closest("button"));
+        });
+        buttonBar.append(restoreButton);
+      } else {
+        const note = document.createElement("div");
+        note.classList.add("dismissed-note");
+        note.textContent = Lang._("unDismissNotePermissions");
+        buttonBar.prepend(note);
+      }
+      return;
+    }
+    if (allowMark) {
+      const check = document.createElement("span");
+      check.setAttribute("aria-hidden", "true");
+      check.textContent = "✓";
+      const okButton = makeButton(
+        ["ok"],
+        Lang._("dismissOkButtonContent"),
+        Lang._("dismissOkTitle"),
+        check
+      );
+      okButton.addEventListener("click", (e) => {
+        dismissThis("ok", e.target.closest("button"));
+      });
+      buttonBar.append(okButton);
+    } else if (State.option.allowHide) {
+      const ignoreButton = makeButton(
+        ["ignore"],
+        Lang._("DISMISS"),
+        Lang._("dismissHideTitle"),
+        dismissIcon.cloneNode(true)
+      );
+      ignoreButton.addEventListener("click", (e) => {
+        dismissThis("hide", e.target.closest("button"));
+      });
+      buttonBar.append(ignoreButton);
+    }
+    if (allowMark && isManualLink(this.result)) {
+      markBroken();
+    }
   }
   disconnectedCallback() {
     if (this._handleDocumentClick) {
@@ -7948,10 +9688,14 @@ class Ed11yElementTip extends HTMLElement {
   }
   toggleTip(changeTo) {
     if (changeTo) {
-      this.wrapper.classList.add("open");
+      if (window.innerWidth < 320 || window.innerHeight < 320) {
+        this.wrapper.showModal();
+      } else {
+        this.wrapper.show();
+      }
       alertOnInvisibleTip(this.result.toggle, this.result.element);
     } else {
-      this.wrapper.classList.remove("open");
+      this.wrapper.requestClose();
     }
     this.setAttribute("data-ed11y-open", changeTo);
   }
@@ -7976,359 +9720,405 @@ class Ed11yElementTip extends HTMLElement {
     }
   }
 }
+const ruleset = {
+  SUS_ALT_STOPWORDS: ["image", "graphic", "picture", "photo", "thumbnail", "icon", "portrait"],
+  PLACEHOLDER_ALT_STOPWORDS: [
+    "alt",
+    "chart",
+    "decorative",
+    "image",
+    "graphic",
+    "photo",
+    "portrait",
+    "placeholder",
+    "placeholder image",
+    "spacer",
+    "tbd",
+    "todo",
+    "to do",
+    "thumbnail",
+    "icon",
+    "test",
+    "hero image",
+    "hero image",
+    "hero slide",
+    "slide image",
+    "homepage feature image",
+    "featured image",
+    "untitled",
+    "untitled image",
+    "unnamed",
+    "copy",
+    "undefined"
+  ],
+  LINK_STOPWORDS: [
+    "click",
+    "click here",
+    "click here for more",
+    "click here to learn more",
+    "clicking here",
+    "check out",
+    "detailed here",
+    "discover",
+    "download",
+    "download here",
+    "explore",
+    "find out",
+    "find out more",
+    "form",
+    "here",
+    "info",
+    "information",
+    "link",
+    "learn",
+    "learn more",
+    "learn to",
+    "more",
+    "page",
+    "paper",
+    "read more",
+    "read",
+    "read this",
+    "this",
+    "this page",
+    "this link",
+    "this website",
+    "this form",
+    "view",
+    "view our",
+    "website",
+    "article",
+    "go",
+    "workshop",
+    "follow us on"
+  ],
+  CLICK: ["click"],
+  NEW_WINDOW_PHRASES: [
+    "external",
+    "new tab",
+    "new window",
+    "pop-up",
+    "pop up",
+    "opens new tab",
+    "opens new window",
+    "opens in a new window",
+    "opens in a new tab"
+  ],
+  FILE_TYPE_PHRASES: [
+    "document",
+    "spreadsheet",
+    "calculation sheet",
+    "compressed file",
+    "archived file",
+    "worksheet",
+    "powerpoint",
+    "presentation",
+    "install",
+    "video",
+    "audio",
+    "pdf"
+  ],
+  POTENTIAL_UI_ELEMENTS: [
+    "menu",
+    "close",
+    "toggle",
+    "open",
+    "expand",
+    "collapse",
+    "next",
+    "prev",
+    "previous",
+    "play",
+    "pause",
+    "submenu",
+    "show",
+    "hide",
+    "dropdown",
+    "back",
+    "forward",
+    "skip",
+    "submit",
+    "cancel",
+    "save",
+    "edit",
+    "delete",
+    "remove",
+    "search",
+    "filter",
+    "sort",
+    "stop",
+    "mute",
+    "unmute",
+    "fullscreen",
+    "minimize",
+    "maximize",
+    "slide",
+    "modal"
+  ],
+  META_TITLE_UNDESCRIPTIVE_STRINGS: [
+    "untitled",
+    "document",
+    "page",
+    "title",
+    "default",
+    "undefined",
+    "index",
+    "new",
+    "placeholder",
+    "webpage",
+    "no title",
+    "insert title here",
+    "hello world",
+    "my app",
+    "my site",
+    "my website",
+    "site title",
+    "your site title"
+  ],
+  // Titles that are non-descriptive at the START of a title ("Untitled document").
+  // Keep these specific: the list above is only matched as a whole title or with a number.
+  META_TITLE_UNDESCRIPTIVE_PREFIXES: [
+    "untitled",
+    "no title",
+    "undefined",
+    "placeholder",
+    "insert title here"
+  ]
+};
+const ui = {
+  LANG_CODE: "en-US",
+  MAIN_TOGGLE_LABEL: "Check Accessibility",
+  CONTAINER_LABEL: "Accessibility Checker",
+  ERROR: "Error",
+  ERRORS: "Errors",
+  WARNING: "Warning",
+  WARNINGS: "Warnings",
+  GOOD: "Good",
+  REVIEW: "Review",
+  ON: "On",
+  OFF: "Off",
+  ALERT_TEXT: "Alert",
+  ALERT_CLOSE: "Close",
+  OUTLINE: "Outline",
+  READABILITY_DESC: "Shows the readability score in the <strong>Outline</strong> tab to help gauge reading difficulty.",
+  TITLE: "Title",
+  ALT: "ALT",
+  IMAGES: "Images",
+  EDIT: "Edit",
+  NO_IMAGES: "No images found.",
+  DECORATIVE: "Decorative",
+  MISSING: "Missing",
+  PAGE_ISSUES: "Page Issues",
+  SETTINGS: "Settings",
+  DEVELOPER_CHECKS: "Developer checks",
+  DEVELOPER_DESC: "Checks for issues that may need coding knowledge to fix, such as HTML attributes, forms, and more.",
+  DARK_MODE: "Dark mode",
+  SHORTCUT_SR: "Skip to issue. Keyboard shortcut: Alt S",
+  SKIP_TO_ISSUE: "Skip to issue",
+  NEW_TAB: "Opens new tab",
+  LINKED: "Linked",
+  PANEL_HEADING: "Accessibility check",
+  NO_ERRORS_FOUND: "No errors found.",
+  WARNINGS_FOUND: "warnings found.",
+  TOTAL_FOUND: "total issues found.",
+  NOT_VISIBLE: "Item is not visible; it may be hidden or inside of an accordion or tab component.",
+  MISSING_ROOT: "The full page was checked for accessibility because the target area <code>%(root)</code> does not exist.",
+  MISSING_READABILITY_ROOT: "The readability score is based on the <code>%(fallback)</code> content area, because the target area <code>%(root)</code> does not exist.",
+  SKIP_TO_PAGE_ISSUES: "Skip to Page Issues",
+  CONSOLE_ERROR: 'Sorry, but there is an issue with the accessibility checker on this page. Can you please <a href="https://forms.gle/sjzK9XykETaoqZv99">report it through this form</a> or on <a href="https://github.com/ryersondmp/sa11y/issues/new?title=Bug%20report">GitHub</a>?',
+  APPEARANCE: "Appearance",
+  MOVE_PANEL: "Move panel",
+  HIDDEN: "Hidden",
+  // Export
+  DATE: "Date",
+  PAGE_TITLE: "Page title",
+  RESULTS: "Results",
+  EXPORT_RESULTS: "Export results",
+  GENERATED: 'Results generated with <a href="https://sa11y.netlify.app">Sa11y.</a>',
+  PREVIEW: "Preview",
+  ELEMENT: "Element",
+  PATH: "Path",
+  // Dismiss
+  PANEL_DISMISS_BUTTON: "Show %(dismissCount) dismissed",
+  DISMISS: "Dismiss",
+  DISMISS_ALL: "Dismiss all",
+  DISMISSED: "Dismissed",
+  DISMISS_REMINDER: "Please note that warnings are only <strong>temporarily</strong> dismissed. Clearing your browser history and cookies will restore all previously dismissed warnings across all pages.",
+  // Colour filters
+  COLOUR_FILTER: "Color filter",
+  PROTANOPIA: "Protanopia",
+  DEUTERANOPIA: "Deuteranopia",
+  TRITANOPIA: "Tritanopia",
+  MONOCHROMACY: "Monochromacy",
+  COLOUR_FILTER_MESSAGE: "Check for elements that are difficult to perceive or distinguish against other colors.",
+  RED_EYE: "Red blind.",
+  GREEN_EYE: "Green blind.",
+  BLUE_EYE: "Blue blind.",
+  MONO_EYE: "Red, blue, and green blind.",
+  COLOUR_FILTER_HIGH_CONTRAST: "Color filters do not work in high contrast mode.",
+  // Readability
+  READABILITY: "Readability",
+  AVG_SENTENCE: "Average words per sentence:",
+  COMPLEX_WORDS: "Complex words:",
+  TOTAL_WORDS: "Words:",
+  VERY_DIFFICULT: "Very difficult",
+  DIFFICULT: "Difficult",
+  FAIRLY_DIFFICULT: "Fairly difficult",
+  READABILITY_NOT_ENOUGH: "Not enough content to calculate readability score."
+};
+const tooltip = {
+  // Headings
+  HEADING_SKIPPED_LEVEL: `Headings should not skip levels or jump from <strong>Heading %(PREV_LEVEL)</strong> to <strong {C}>Heading %(LEVEL)</strong>, as this disrupts the content's order and hierarchy, making it harder to follow. <hr> <strong {B}>Heading</strong> <strong {C}>%(HEADING)</strong> <hr> <strong>Tip!</strong> If this heading falls under the "<em>%(PREV_HEADING)</em>" section, then consider formatting it as a Heading %(level) instead.`,
+  HEADING_EMPTY: "Empty heading found! To fix, delete this line or change its format from <strong {C}>Heading %(level)</strong> to <strong>Normal</strong> or <strong>Paragraph</strong>.",
+  HEADING_LONG: "Heading is long! Headings should be used to organize content and convey structure. They should be brief, informative, and unique. Please keep headings less than %(MAX_LENGTH) characters (no more than a sentence). <hr> <strong {B}>Heading</strong> <strong {B}>%(HEADING_LENGTH) Characters</strong> <strong {C}>%(TEXT)</strong>",
+  HEADING_FIRST: 'The first heading on a page should usually be a Heading 1 or Heading 2. Heading 1 should be the start of the main content section, and is the main heading that describes the overall purpose of the page. Learn more about <a href="https://www.w3.org/WAI/tutorials/page-structure/headings/">heading structure.</a>',
+  HEADING_MISSING_ONE: 'Missing Heading 1. Heading 1 should be the start of the main content area, and is the main heading that describes the overall purpose of the page. Learn more about <a href="https://www.w3.org/WAI/tutorials/page-structure/headings/">heading structure.</a>',
+  HEADING_EMPTY_WITH_IMAGE: "Heading has no text, but contains an image. If this is not a heading, change its format from <strong {C}>Heading %(level)</strong> to <strong>Normal</strong> or <strong>Paragraph</strong>. Otherwise, please add alt text to the image if it is not decorative.",
+  HEADING_UNPRONOUNCEABLE: "Heading text only contains symbols or unpronounceable characters. If you think this is an error due to a copy/paste bug, consider deleting it. <hr> <strong {B}>Heading text</strong> <strong {C}>%(TEXT)</strong>",
+  PANEL_HEADING_MISSING_ONE: "Missing Heading 1!",
+  PANEL_NO_HEADINGS: "No headings found.",
+  // Links
+  LINK_EMPTY: "Remove empty links without any text.",
+  LINK_EMPTY_LABELLEDBY: "Link has an <code>aria-labelledby</code> value that is empty or does not match the <code>id</code> value of another element on the page.",
+  LINK_EMPTY_NO_LABEL: 'Link does not have discernible text that is visible to screen readers and other assistive technology. To fix: <ul><li>Add concise text that describes where the link takes you.</li><li>If it is an <a href="https://a11y-101.com/development/icons-and-links">icon link or SVG,</a> it is likely missing a descriptive label.</li><li>If you think this link is an error due to a copy/paste bug, consider deleting it.</li></ul>',
+  LINK_STOPWORD: "Link text may not be descriptive enough out of context. <hr> <strong {B}>Link text</strong> <strong {C}>%(ERROR)</strong>",
+  LINK_STOPWORD_ARIA: "Although an accessible name was provided, consider revising the visible link text. Phrases like &quot;<strong {C}>%(ERROR)</strong>&quot; are not meaningful.",
+  LINK_TIP: "<hr> <strong>Tip!</strong> Use clear and unique link text that describes the destination of the link, typically the page or document title.",
+  LINK_CLICK_HERE: 'The phrase "click" or "click here" places focus on mouse mechanics, when many people do not use a mouse or may be viewing this website on a mobile device. Consider using a different verb that relates to the task. <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
+  DUPLICATE_TITLE: 'The <code>title</code> attribute on links and images is meant to provide extra information, and should be <strong>different</strong> than the text or alt text. The title text appears when hovering over an element, but is not accessible with a keyboard or touch input. Consider <a href="https://www.a11yproject.com/posts/title-attributes/">avoiding the title attribute completely.</a>',
+  LINK_SYMBOLS: "Avoid using symbols as calls to action within link text unless they are hidden from assistive technologies. Screen readers may read the symbols out loud, which can be confusing. Consider removing: <strong {C}>%(ERROR)</strong> <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
+  LINK_URL: "Longer, less intelligible URLs used as link text might be difficult to comprehend with assistive technology. In most cases, it is better to use human-readable text instead of the URL. Short URLs (such as a site's homepage) are okay. <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
+  LINK_DOI: 'For web pages or online-only resources, the <a href="https://apastyle.apa.org/style-grammar-guidelines/paper-format/accessibility/urls#:~:text=descriptive%20links">APA Style guide</a> recommends using descriptive links by wrapping the URL or DOI of the work around its title. Longer, less intelligible URLs used as link text might be difficult to comprehend with assistive technology. <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
+  LINK_NEW_TAB: `Link opens in a new tab or window without warning. Doing so can be disorienting, especially for people who have difficulty perceiving visual content. Secondly, it is not always a good practice to control someone's experience or make decisions for them. Indicate that the link opens in a new window within the link text. Learn best practices when <a href="https://www.nngroup.com/articles/new-browser-windows-and-tabs/">opening links in new browser windows and tabs.</a>`,
+  LINK_FILE_EXT: 'Link points to a PDF or downloadable file (e.g. MP3, Zip, Word Doc) without warning. Indicate the file type within the link text. If it is a large file, consider including the file size. For example: "Executive Report (PDF, 3MB)" <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
+  LINK_IDENTICAL_NAME: "Multiple links on this page use the same link text but point to different places. This may cause confusion for assistive technology users. To fix, make this link text more descriptive.",
+  LINK_UNPRONOUNCEABLE: "Link text only contains symbols. If you think this link is an error due to a copy/paste bug, consider deleting it.  <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
+  // Images
+  ALT_UNPRONOUNCEABLE: "The alt text only contains unpronounceable symbols and/or spaces. Screen readers will announce the image and then pause. If the image is decorative, ensure there are no spaces within the alt text. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  LINK_ALT_UNPRONOUNCEABLE: "The alt text within this linked image only contains unpronounceable symbols and/or spaces. Screen readers will announce the image and then pause. Ensure the alt text describes the destination of the link. <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  MISSING_ALT_LINK_HAS_TEXT: "Image is being used as a link with surrounding text, although the alt attribute should be marked as decorative.",
+  MISSING_ALT_LINK: "Image is being used as a link but is missing alt text! Please ensure alt text describes where the link takes you.",
+  MISSING_ALT: "Missing alt text! If the image conveys a story, mood, or important information, make sure to describe it clearly.",
+  LINK_ALT_FILE_EXT: "Alt text should not include file extensions or image dimensions. Ensure the alt text describes the destination of the link, not a literal description of the image. Remove: <strong {C}>%(ERROR)</strong> <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  LINK_PLACEHOLDER_ALT: "Non-descript or placeholder alt text within a linked image found. Ensure the alt text describes the destination of the link, not a literal description of the image. Replace the following alt text. <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  LINK_SUS_ALT: "Assistive technologies already indicate that this is an image, so &quot;<strong {C}>%(ERROR)</strong>&quot; may be redundant. Ensure the alt text describes the destination of the link, not a literal description of the image. <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  ALT_FILE_EXT: "Alt text should not include file extensions or image dimensions. If the image conveys a story, mood, or important information, be sure to describe the image. Remove: <strong {C}>%(ERROR)</strong>. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  ALT_PLACEHOLDER: "Non-descript or placeholder alt text found. Replace the following alt text with something more meaningful. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  SUS_ALT: "Assistive technologies already indicate that this is an image, so &quot;<strong {C}>%(ERROR)</strong>&quot; may be redundant. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  LINK_IMAGE_NO_ALT_TEXT: "Image within link is marked as decorative and there is no link text. Please add alt text to the image that describes the destination of the link.",
+  LINK_IMAGE_TEXT: "Image is marked as decorative, although the link is using the surrounding text as a descriptive label.",
+  LINK_IMAGE_LONG_ALT: "Alt text description on a linked image is <strong>too long</strong>. The alt text on linked images should describe where the link takes you, not a literal description of the image. <strong>Consider using the title of the page it links to as the alt text.</strong> <hr> {L} {ALT} <strong {B}>%(altLength) Characters</strong> <strong {C}>%(ALT_TEXT)</strong>",
+  LINK_IMAGE_ALT: "Image link contains alt text. Does the alt text describe where the link takes you? <strong>Consider using the title of the page it links to as the alt text.</strong> <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  LINK_IMAGE_ALT_AND_TEXT: "Image link contains <strong>both alt text and surrounding link text.</strong> If this image is decorative and is being used as a functional link to another page, consider marking the image as decorative. The surrounding link text should suffice. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong> <hr> <strong {B}>Accessible Name</strong> {L} <strong {C}>%(TEXT)</strong>",
+  IMAGE_FIGURE_DECORATIVE: 'Image is marked as <strong>decorative</strong> and will be ignored by assistive technology. <hr> Although a <strong>caption</strong> was provided, the image should also have alt text in most cases. <ul><li>The alt text should provide a concise description of what is in the image.</li><li>The caption should usually provide context to relate the image back to the surrounding content, or give attention to a particular piece of information.</li></ul> Learn more: <a href="https://thoughtbot.com/blog/alt-vs-figcaption#the-figcaption-element">alt versus figcaption.</a>',
+  IMAGE_FIGURE_DUPLICATE_ALT: 'Do not use the exact same words for both the alt and caption text. Screen readers will announce the information twice.<ul><li>The alt text should provide a concise description of what is in the image.</li><li>The caption should usually provide context to relate the image back to the surrounding content, or give attention to a particular piece of information.</li></ul> Learn more: <a href="https://thoughtbot.com/blog/alt-vs-figcaption#the-figcaption-element">alt versus figcaption.</a> <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>',
+  IMAGE_DECORATIVE: "Image is marked as <strong>decorative</strong> and will be ignored by assistive technology. If the image conveys a story, mood, or important information, make sure to add alt text.",
+  IMAGE_DECORATIVE_CAROUSEL: "Image is marked as <strong>decorative</strong>, but all images in a carousel or gallery should include descriptive alt text to ensure an equivalent experience for everyone.",
+  IMAGE_ALT_TOO_LONG: "Alt text description is <strong>too long</strong>. Alt text should be concise, yet meaningful like a <em>tweet</em> (around 100 characters). If this is a complex image or a graph, consider putting the long description of the image in the text below or an accordion component. <hr> {ALT} <strong {B}>%(altLength) Characters</strong> <strong {C}>%(ALT_TEXT)</strong>",
+  IMAGE_PASS: "{ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  LINK_ALT_MAYBE_BAD: "Image link has alt text that may not provide useful information or contains non-descript text. Ensure the alt text describes the destination of the link. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  ALT_MAYBE_BAD: "Alt text may not provide useful information or contains non-descript text. Improve the following alt text: <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
+  // Labels
+  LABELS_MISSING_IMAGE_INPUT: "Image button is missing alt text. Please add alt text to provide an accessible name. For example: <em>Search</em> or <em>Submit</em>.",
+  LABELS_INPUT_RESET: 'Reset buttons should not be used unless specifically needed because they are easy to activate by mistake. <hr> <strong>Tip!</strong> Learn why <a href="https://www.nngroup.com/articles/reset-and-cancel-buttons/">Reset and Cancel buttons pose usability issues.</a>',
+  LABELS_ARIA_LABEL_INPUT: "Input has an accessible name, although please ensure there is a visible label too. <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>",
+  LABELS_NO_FOR_ATTRIBUTE: "There is no label associated with this input. Add a <code>for</code> attribute to the label that matches the <code>id</code> of this input. <hr> <strong {B}>ID</strong> <strong {C}>#%(id)</strong>",
+  LABELS_MISSING_LABEL: "There is no label associated with this input. Please add an <code>id</code> to this input, and add a matching <code>for</code> attribute to the label.",
+  LABELS_PLACEHOLDER: 'Disappearing placeholder text makes it hard for people to remember what information belongs in a field and to identify and correct validation issues. Instead, consider using a permanently visible hint before the form field. <hr> Learn more: <a href="https://www.nngroup.com/articles/form-design-placeholders/">Placeholders in form fields are harmful.</a>',
+  ARIA_INPUT_FIELD_NAME: 'ARIA input or toggle field is missing an accessible name. To fix, provide a valid <code>aria-labelledby</code>, <code>aria-label</code>, or <code>title</code> attribute. If the input is toggleable (e.g., checkbox, switch, radio), adding visible inner text will also resolve this. <div class="cp-none"><hr> <strong {B}>Element</strong> <pre><code>%(EL)</code></pre></div>',
+  // Embedded content
+  EMBED_VIDEO: "Please ensure <strong>all videos have closed captioning.</strong> Providing captions for all audio and video content is a mandatory Level A requirement. Captions support people who are D/deaf or hard-of-hearing.",
+  EMBED_AUDIO: "Please ensure to provide a <strong>transcript for all podcasts.</strong> Providing transcripts for audio content is a mandatory Level A requirement. Transcripts support people who are D/deaf or hard-of-hearing, but can benefit everyone. Consider placing the transcript below or within an accordion panel.",
+  EMBED_DATA_VIZ: `Data visualization widgets like this are often problematic for people who use a keyboard or screen reader to navigate, and can present significant difficulties for people who have low vision or colorblindness. It's recommended to provide the same information in an alternative (text or table) format below the widget. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/images/complex">complex images.</a>`,
+  EMBED_MISSING_TITLE: 'Embedded content requires an accessible name that describes its contents. Please provide a unique <code>title</code> or <code>aria-label</code> attribute on the <code>&lt;%(ELEMENT)&gt;</code> element. Learn more about <a href="https://web.dev/learn/accessibility/more-html#iframes">iFrames.</a>',
+  EMBED_GENERAL: 'Unable to check embedded content. Please make sure that images have alt text, videos have captions, text has sufficient contrast, and interactive components are <a href="https://webaim.org/techniques/keyboard/">keyboard accessible.</a>',
+  EMBED_UNFOCUSABLE: '<code>&lt;iframe&gt;</code> with focusable elements should not have <code>tabindex="-1"</code>. The embedded content will not be keyboard accessible.',
+  EMBED_VIDEO_AUTOPLAY: 'Auto-playing videos that cannot be paused can distract people and interfere with screen readers. Please ensure users can stop the video by adding the <code>controls</code> attribute, providing a visible pause button, or removing the <code>autoplay</code> attribute. <hr> Learn more about <a href="https://www.w3.org/WAI/WCAG21/Understanding/pause-stop-hide.html">Pause, Stop, Hide.</a>',
+  // Quality assurance
+  QA_BAD_LINK: "Bad link found. Link appears to point to a development environment. <hr> {L} <strong {C}>%(LINK)</strong>",
+  QA_STRONG_ITALICS: "Bold and italic tags have semantic meaning, and should <strong>not</strong> be used to highlight entire paragraphs. Bolded text should be used to provide strong <strong>emphasis</strong> on a word or phrase. Italics should be used to highlight proper names (i.e. book and article titles), foreign words, quotes. Long quotes should be formatted as a blockquote. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  QA_PDF: 'Unable to check PDFs for accessibility. PDFs are considered web content and must be made accessible as well. PDFs often contain issues for people who use screen readers (missing structural tags or missing form field labels) and people who have low vision (text does not reflow when enlarged). <ul><li>If this is a form, consider using an accessible HTML form as an alternative.</li><li>If this is a document, consider converting it into a web page.</li></ul>Otherwise, please check <a href="https://helpx.adobe.com/acrobat/using/create-verify-pdf-accessibility.html">PDF for accessibility in Acrobat DC.</a> <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
+  QA_DOCUMENT: 'Unable to check document for accessibility. Linked documents are considered web content and must be made accessible as well. Please manually review this document. <ul><li>Make your <a href="https://support.google.com/docs/answer/6199477?hl=en">Google Workspace document or presentation more accessible.</a></li><li>Make your <a href="https://support.microsoft.com/en-us/office/create-accessible-office-documents-868ecfcd-4f00-4224-b881-a65537a7c155">Office documents more accessible.</a></li></ul> <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
+  QA_BLOCKQUOTE: "Should this blockquote be a heading? Blockquotes should be used for quotes only. If this is intended to be a heading, change this blockquote to a semantic heading (e.g. Heading 2 or Heading 3). <hr> <strong {B}>Blockquote</strong> <strong {C}>%(TEXT)</strong>",
+  QA_FAKE_HEADING: "Is this a heading? A line of bold or large text might look like a heading, but someone using a screen reader cannot tell that it is important or jump to its content. Bold or large text should never replace semantic headings (Heading 2 to Heading 6). <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  QA_FAKE_LIST: 'Are you trying to create a list? Possible list item found: <strong {C}>%(PREFIX)</strong> <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong> <hr> Make sure to use semantic lists by using the bullet or number formatting buttons instead. When using a semantic list, assistive technologies are able to convey information such as the total number of items and the relative position of each item in the list. Learn more about <a href="https://www.w3.org/WAI/tutorials/page-structure/content/#lists">semantic lists.</a>',
+  QA_UPPERCASE: "Found all caps. Some screen readers may interpret all caps text as an acronym and will read each letter individually. Additionally, some people find all caps more difficult to read and it may give the appearance of SHOUTING. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  QA_UNDERLINE: "Underlined text can be confused with links. Consider using a different style such as <code>&lt;strong&gt;</code><strong>strong importance</strong><code>&lt;/strong&gt;</code> or <code>&lt;em&gt;</code><em>emphasis</em><code>&lt;/em&gt;</code>. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  QA_SUBSCRIPT: "The subscript and superscript formatting options should only be used to change the position of text for typographical conventions or standards. It should <strong>not</strong> solely be used for presentation or appearance purposes. Formatting entire sentences poses readability issues. Appropriate use cases would include displaying exponents, ordinal numbers such as 4<sup>th</sup> instead of fourth, and chemical formulas (e.g. H<sub>2</sub>O). <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  QA_IN_PAGE_LINK: "Broken same-page link. This link tries to navigate to a section of the page that cannot be found. To fix this, make sure the link matches the <code>id</code> of the element you want to jump to. <hr> <strong {B}>ID</strong> <strong {C}>#%(ID)</strong>",
+  QA_NESTED_COMPONENTS: "Avoid nesting interactive layout components, such as placing accordions within other accordions, or placing tabs inside accordions and vice versa. This can complicate navigation, increase cognitive overload, and lead to people overlooking content.",
+  QA_JUSTIFY: "Avoid using justified text, which aligns to both the left and right margins. This can be difficult for some people to read due to the uneven spaces between words. Use left-aligned text for better readability. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  QA_SMALL_TEXT: "Small text is harder to read, particularly for those with low vision. To ensure better readability, avoid using font sizes smaller than the default. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  // Shared
+  LINK_TEXT: "<strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
+  ACC_NAME: "<strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>",
+  ACC_NAME_TIP: `<hr><strong>Tip!</strong> The "accessible name" is the final label that gets communicated to people who use assistive technology. This helps them understand the element's purpose.`,
+  HIDDEN_FOCUSABLE: 'This element can receive keyboard focus, but is hidden from screen readers by an <code>aria-hidden="true"</code> attribute (on itself or a parent container). To fix, either remove the aria-hidden attribute or remove the element from the tab order. <div class="cp-none"><hr> <strong {B}>Element</strong> <pre><code>%(EL)</code></pre></div> <hr> Learn more about the <a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-hidden">aria-hidden attribute.</a>',
+  // Developer checks
+  DUPLICATE_ID: "Found <strong>duplicate ID</strong>. Duplicate ID errors are known to cause problems for assistive technologies when they are trying to interact with content. Please remove or change the following ID. <hr> <strong {B}>ID</strong> <strong {C}>#%(id)</strong>",
+  UNCONTAINED_LI: "All <code>&lt;li&gt;</code> list items must be placed inside <code>&lt;ul&gt;</code> unordered or <code>&lt;ol&gt;</code> ordered elements. This structure helps screen readers announce the list and its items accurately. <hr> <strong {B}>List item</strong> <strong {C}>%(TEXT)</strong>",
+  TABINDEX_ATTR: "Element should not have a <code>tabindex</code> attribute greater than 0.",
+  SVG_NO_ACCESSIBLE_NAME: `Some screen readers will announce this SVG as an unlabeled image because it lacks an accessible name and is not hidden. Add an accessible label (or <code>&lt;title&gt;</code>) if it conveys meaning, or hide it from screen readers if it's purely decorative (<code>aria-hidden="true"</code>). <hr> Learn more about <a href="https://a11y-101.com/development/svg">accessible SVGs.</a>`,
+  SUMMARY_EMPTY: "Summary element within the <code>&lt;details&gt;</code> has no accessible name. Add descriptive text inside the <code>&lt;summary&gt;</code> element.",
+  // Meta checks
+  META_TITLE: 'Missing page title! Please provide a <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/title">page title.</a>',
+  META_TITLE_UNDESCRIPTIVE: 'The page title "<em>%(TEXT)</em>" may not be descriptive or convey the subject or purpose of the page. Page titles should be unique, concise, and clearly describe the page content. Learn more about <a href="https://www.w3.org/WAI/WCAG22/Understanding/page-titled.html">meaningful page titles.</a>',
+  META_SCALABLE: 'Remove the <code>user-scalable="no"</code> parameter in the <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Viewport_meta_tag">viewport meta tag</a> in order to allow zooming.',
+  META_MAX: 'Ensure the <code>maximum-scale</code> parameter in the <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Viewport_meta_tag">viewport meta tag</a> is not less than 2.',
+  META_LANG: 'Page language not declared! Please <a href="https://www.w3.org/International/questions/qa-html-language-declarations">declare language on the HTML tag.</a>',
+  META_REFRESH: "Page should not automatically refresh using a meta tag.",
+  META_LANG_SUGGEST: "The following language code <code>%(CODE)</code> is not valid. Did you mean <code>%(CODE)</code>?",
+  META_LANG_VALID: 'The language code for this element is not valid. To fix, replace the lang attribute with a valid language code. <div class="cp-none"><hr> <strong {B}>Element</strong> <code>&lt;%(ELEMENT) lang="%(CODE)"&gt;</code></div> <hr> Learn more about <a href="https://www.w3.org/International/questions/qa-html-language-declarations">declaring language in HTML.</a>',
+  // Buttons
+  BTN_EMPTY: "Button is missing an accessible name that describes its purpose.",
+  BTN_EMPTY_LABELLEDBY: "Button has an <code>aria-labelledby</code> value that is empty or does not match the <code>id</code> value of another element on the page.",
+  BTN: "button",
+  BTN_TIP: ' Learn how to make an <a href="https://www.sarasoueidan.com/blog/accessible-icon-buttons/">accessible button.</a>',
+  BTN_ROLE_IN_NAME: 'Do not include the word "button" in the name of a button. Screen readers already convey the role of an element in addition to its name. <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>',
+  LABEL_IN_NAME: "The visible text for this element appears to be different than the accessible name, which may cause confusion for assistive technologies users. Please review: <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong> <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>",
+  LINK_MAYBE_BUTTON: `This link has an invalid target. Although the accessible name or its attributes suggests that this might not be a link at all, and instead controls some scripted behaviour on the page. To fix, replace the link with an <a href="https://www.w3.org/WAI/ARIA/apg/patterns/button/">accessible button</a>, or correct the link's destination. <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong> <hr> <strong>Tip!</strong> Assistive technologies treat buttons and links differently. Using the correct HTML element ensures users know which keyboard shortcuts to use and what action will trigger.`,
+  // Tables
+  TABLES_SINGLE_COLUMN: 'Is this a table? Single-column tables are often used for layout or lists rather than tabular data. This may be confusing for people using screen readers, who have to stop and listen to structural descriptions intended for data grids, for example <em>"table, 5 rows, 1 column"</em>. Remove the table and use a list instead.',
+  TABLES_SINGLE_CELL: 'Is this a table? Single-cell tables are often used for visual borders or callout containers rather than tabular data. This may be confusing for people using screen readers, who have to stop and listen to structural descriptions intended for data grids: <em>"Table, 1 row, 1 column, Row 1 Column 1."</em> Remove the table and use other styling options to bring attention to this content.',
+  TABLES_MISSING_HEADINGS: 'Missing table headers! Accessible tables need HTML markup that indicates header cells and data cells which defines their relationship. This information provides context to people who use assistive technology. Tables should be used for tabular data only. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/tables/">accessible tables.</a>',
+  TABLES_SEMANTIC_HEADING: 'Semantic headings such as Heading 2 or Heading 3 should only be used for sections of content; <strong>not</strong> in HTML tables. Indicate table headings using the <code>&lt;th&gt;</code> element instead. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/tables/">accessible tables.</a>',
+  TABLES_EMPTY_HEADING: 'Empty table header found! Table headers should <strong>never</strong> be empty. It is important to designate row and/or column headers to convey their relationship. This information provides context to people who use assistive technology. Please keep in mind that tables should be used for tabular data only. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/tables/">accessible tables.</a>',
+  TABLES_INVALID_HEADERS_REF: 'This table is attempting to label a specific data cell with a specific header cell, but the header ID cannot be found. Make sure each <code>headers</code> attribute matches the ID of a header cell in the same table. <hr> <strong {B}>Headers</strong> <code>%(VALUE)</code> <hr> <strong>Tip!</strong> <a href="https://www.w3.org/WAI/WCAG22/Techniques/html/H43">Using manual ID references</a> to associate data cells with header cells is complicated and fragile. When possible, break complex data into smaller tables with simple header rows and columns.',
+  // Contrast
+  CONTRAST_NORMAL: "Normal-sized text should have at least a %(RATIO) ratio.",
+  CONTRAST_LARGE: "Large-sized text should have at least a %(RATIO) ratio.",
+  CONTRAST_ERROR: "Text does not have enough contrast with the background, making it harder to read.",
+  CONTRAST_WARNING: "The contrast of this text is unknown and needs to be manually reviewed. Ensure the text and the background have strong contrasting colors.",
+  CONTRAST_ERROR_GRAPHIC: "Graphic does not have enough contrast with the background, making it harder to see.",
+  CONTRAST_WARNING_GRAPHIC: "The contrast of this graphic is unknown and needs to be manually reviewed.",
+  CONTRAST_TIP_GRAPHIC: "Graphics and user interface elements should have at least a 3:1 ratio.",
+  CONTRAST_OPACITY: "Increase the opacity for better visibility.",
+  CONTRAST_APCA: "This is not enough contrast for any size text. Consider using this color and text size combination?",
+  CONTRAST_COLOR: "Consider using this color instead?",
+  CONTRAST_SIZE: "Consider making the text size larger for this color combination?",
+  CONTRAST_PLACEHOLDER: "Placeholder text within this input does not have enough contrast with the background, making it harder to read.",
+  CONTRAST_PLACEHOLDER_UNSUPPORTED: "The contrast of this placeholder text is unknown and needs to be manually reviewed. Ensure the text and the background have strong contrasting colours.",
+  CONTRAST_INPUT: "Text within this input does not have enough contrast with the background, making it harder to read.",
+  CONTRAST: "Contrast",
+  UNKNOWN: "Unknown",
+  FG: "Foreground",
+  BG: "Background",
+  NO_SUGGESTION: "No accessible combination can be found by changing the text color. Try changing the background color.",
+  // Language of parts
+  PAGE_LANG_CONFIDENCE: 'More than half of the text on this page appears to be %(LIKELY_LANG), but the declared page language is %(PAGE_LANG). Consider updating the <a href="https://www.w3.org/International/questions/qa-html-language-declarations">declared page language</a> to match the content.',
+  LANG_OF_PARTS: "The page language was declared as %(PAGE_LANG), but this content appears to be %(LIKELY_LANG). Ensure the content is tagged appropriately. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  LANG_MISMATCH: "This content appears to be %(DETECTED_LANG), however, it was tagged as %(WRONG_LANG). <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
+  LANG_OF_PARTS_ALT: "This alt text appears to be %(LIKELY_LANG), but the page language was declared as %(PAGE_LANG). Ensure the alt text is in the same language as the rest of the page. <hr> {ALT} <strong {C}>%(ALT)</strong>",
+  LANG_TIP: '<hr><strong>Tip!</strong> Screen readers pronounce words using language tags. Pronouncing a language with a mismatched language pack produces unintelligible speech. Learn more about <a href="https://www.w3.org/WAI/WCAG22/Understanding/language-of-parts.html">language of parts.</a>',
+  LANG_UNSUPPORTED: "Language-related accessibility checks were skipped because automatic language detection isn’t supported in this browser."
+};
 const Sa11yStrings = {
-  // English
   strings: {
-    LANG_CODE: "en-US",
-    MAIN_TOGGLE_LABEL: "Check Accessibility",
-    CONTAINER_LABEL: "Accessibility Checker",
-    ERROR: "Error",
-    ERRORS: "Errors",
-    WARNING: "Warning",
-    WARNINGS: "Warnings",
-    GOOD: "Good",
-    REVIEW: "Review",
-    ON: "On",
-    OFF: "Off",
-    ALERT_TEXT: "Alert",
-    ALERT_CLOSE: "Close",
-    OUTLINE: "Outline",
-    READABILITY_DESC: "Shows the readability score in the <strong>Outline</strong> tab to help gauge reading difficulty.",
-    TITLE: "Title",
-    ALT: "ALT",
-    IMAGES: "Images",
-    EDIT: "Edit",
-    NO_IMAGES: "No images found.",
-    DECORATIVE: "Decorative",
-    MISSING: "Missing",
-    PAGE_ISSUES: "Page Issues",
-    SETTINGS: "Settings",
-    DEVELOPER_CHECKS: "Developer checks",
-    DEVELOPER_DESC: "Checks for issues that may need coding knowledge to fix, such as HTML attributes, forms, and more.",
-    DARK_MODE: "Dark mode",
-    SHORTCUT_SR: "Skip to issue. Keyboard shortcut: Alt S",
-    SKIP_TO_ISSUE: "Skip to issue",
-    NEW_TAB: "Opens new tab",
-    LINKED: "Linked",
-    PANEL_HEADING: "Accessibility check",
-    NO_ERRORS_FOUND: "No errors found.",
-    WARNINGS_FOUND: "warnings found.",
-    TOTAL_FOUND: "total issues found.",
-    NOT_VISIBLE: "Item is not visible; it may be hidden or inside of an accordion or tab component.",
-    MISSING_ROOT: "The full page was checked for accessibility because the target area <code>%(root)</code> does not exist.",
-    MISSING_READABILITY_ROOT: "The readability score is based on the <code>%(fallback)</code> content area, because the target area <code>%(root)</code> does not exist.",
-    SKIP_TO_PAGE_ISSUES: "Skip to Page Issues",
-    CONSOLE_ERROR: 'Sorry, but there is an issue with the accessibility checker on this page. Can you please <a href="https://forms.gle/sjzK9XykETaoqZv99">report it through this form</a> or on <a href="https://github.com/ryersondmp/sa11y/issues/new?title=Bug%20report">GitHub</a>?',
-    APPEARANCE: "Appearance",
-    MOVE_PANEL: "Move panel",
-    HIDDEN: "Hidden",
-    // Export
-    DATE: "Date",
-    PAGE_TITLE: "Page title",
-    RESULTS: "Results",
-    EXPORT_RESULTS: "Export results",
-    GENERATED: 'Results generated with <a href="https://sa11y.netlify.app">Sa11y.</a>',
-    PREVIEW: "Preview",
-    ELEMENT: "Element",
-    PATH: "Path",
-    // Dismiss
-    PANEL_DISMISS_BUTTON: "Show %(dismissCount) dismissed",
-    DISMISS: "Dismiss",
-    DISMISS_ALL: "Dismiss all",
-    DISMISSED: "Dismissed",
-    DISMISS_REMINDER: "Please note that warnings are only <strong>temporarily</strong> dismissed. Clearing your browser history and cookies will restore all previously dismissed warnings across all pages.",
-    // Colour filters
-    COLOUR_FILTER: "Color filter",
-    PROTANOPIA: "Protanopia",
-    DEUTERANOPIA: "Deuteranopia",
-    TRITANOPIA: "Tritanopia",
-    MONOCHROMACY: "Monochromacy",
-    COLOUR_FILTER_MESSAGE: "Check for elements that are difficult to perceive or distinguish against other colors.",
-    RED_EYE: "Red blind.",
-    GREEN_EYE: "Green blind.",
-    BLUE_EYE: "Blue blind.",
-    MONO_EYE: "Red, blue, and green blind.",
-    COLOUR_FILTER_HIGH_CONTRAST: "Color filters do not work in high contrast mode.",
-    // Alternative text stop words
-    SUS_ALT_STOPWORDS: ["image", "graphic", "picture", "photo", "thumbnail", "icon"],
-    PLACEHOLDER_ALT_STOPWORDS: [
-      "alt",
-      "chart",
-      "decorative",
-      "image",
-      "graphic",
-      "photo",
-      "placeholder",
-      "placeholder image",
-      "spacer",
-      "tbd",
-      "todo",
-      "to do",
-      "thumbnail",
-      "icon",
-      "test",
-      "hero image",
-      "hero image",
-      "hero slide",
-      "slide image",
-      "homepage feature image",
-      "featured image",
-      "untitled",
-      "untitled image",
-      "unnamed",
-      "copy",
-      "undefined"
-    ],
-    LINK_STOPWORDS: [
-      "click",
-      "click here",
-      "click here for more",
-      "click here to learn more",
-      "clicking here",
-      "check out",
-      "detailed here",
-      "discover",
-      "download",
-      "download here",
-      "explore",
-      "find out",
-      "find out more",
-      "form",
-      "here",
-      "info",
-      "information",
-      "link",
-      "learn",
-      "learn more",
-      "learn to",
-      "more",
-      "page",
-      "paper",
-      "read more",
-      "read",
-      "read this",
-      "this",
-      "this page",
-      "this link",
-      "this website",
-      "this form",
-      "view",
-      "view our",
-      "website",
-      "article",
-      "go",
-      "workshop"
-    ],
-    CLICK: ["click"],
-    NEW_WINDOW_PHRASES: [
-      "external",
-      "new tab",
-      "new window",
-      "pop-up",
-      "pop up",
-      "opens new tab",
-      "opens new window",
-      "opens in a new window",
-      "opens in a new tab"
-    ],
-    FILE_TYPE_PHRASES: [
-      "document",
-      "spreadsheet",
-      "calculation sheet",
-      "compressed file",
-      "archived file",
-      "worksheet",
-      "powerpoint",
-      "presentation",
-      "install",
-      "video",
-      "audio",
-      "pdf"
-    ],
-    // Readability
-    READABILITY: "Readability",
-    AVG_SENTENCE: "Average words per sentence:",
-    COMPLEX_WORDS: "Complex words:",
-    TOTAL_WORDS: "Words:",
-    VERY_DIFFICULT: "Very difficult",
-    DIFFICULT: "Difficult",
-    FAIRLY_DIFFICULT: "Fairly difficult",
-    READABILITY_NOT_ENOUGH: "Not enough content to calculate readability score.",
-    // Headings
-    HEADING_SKIPPED_LEVEL: `Headings should not skip levels or jump from <strong>Heading %(PREV_LEVEL)</strong> to <strong {C}>Heading %(LEVEL)</strong>, as this disrupts the content's order and hierarchy, making it harder to follow. <hr> <strong {B}>Heading</strong> <strong {C}>%(HEADING)</strong> <hr> <strong>Tip!</strong> If this heading falls under the "<em>%(PREV_HEADING)</em>" section, then consider formatting it as a Heading %(level) instead.`,
-    HEADING_EMPTY: "Empty heading found! To fix, delete this line or change its format from <strong {C}>Heading %(level)</strong> to <strong>Normal</strong> or <strong>Paragraph</strong>.",
-    HEADING_LONG: "Heading is long! Headings should be used to organize content and convey structure. They should be brief, informative, and unique. Please keep headings less than %(MAX_LENGTH) characters (no more than a sentence). <hr> <strong {B}>Heading</strong> <strong {B}>%(HEADING_LENGTH) Characters</strong> <strong {C}>%(TEXT)</strong>",
-    HEADING_FIRST: 'The first heading on a page should usually be a Heading 1 or Heading 2. Heading 1 should be the start of the main content section, and is the main heading that describes the overall purpose of the page. Learn more about <a href="https://www.w3.org/WAI/tutorials/page-structure/headings/">heading structure.</a>',
-    HEADING_MISSING_ONE: 'Missing Heading 1. Heading 1 should be the start of the main content area, and is the main heading that describes the overall purpose of the page. Learn more about <a href="https://www.w3.org/WAI/tutorials/page-structure/headings/">heading structure.</a>',
-    HEADING_EMPTY_WITH_IMAGE: "Heading has no text, but contains an image. If this is not a heading, change its format from <strong {C}>Heading %(level)</strong> to <strong>Normal</strong> or <strong>Paragraph</strong>. Otherwise, please add alt text to the image if it is not decorative.",
-    PANEL_HEADING_MISSING_ONE: "Missing Heading 1!",
-    PANEL_NO_HEADINGS: "No headings found.",
-    // Links
-    LINK_EMPTY: "Remove empty links without any text.",
-    LINK_EMPTY_LABELLEDBY: "Link has an <code>aria-labelledby</code> value that is empty or does not match the <code>id</code> value of another element on the page.",
-    LINK_EMPTY_NO_LABEL: 'Link does not have discernible text that is visible to screen readers and other assistive technology. To fix: <ul><li>Add concise text that describes where the link takes you.</li><li>If it is an <a href="https://a11y-101.com/development/icons-and-links">icon link or SVG,</a> it is likely missing a descriptive label.</li><li>If you think this link is an error due to a copy/paste bug, consider deleting it.</li></ul>',
-    LINK_STOPWORD: "Link text may not be descriptive enough out of context. <hr> <strong {B}>Link text</strong> <strong {C}>%(ERROR)</strong>",
-    LINK_STOPWORD_ARIA: "Although an accessible name was provided, consider revising the visible link text. Phrases like &quot;<strong {C}>%(ERROR)</strong>&quot; are not meaningful.",
-    LINK_TIP: "<hr> <strong>Tip!</strong> Use clear and unique link text that describes the destination of the link, typically the page or document title.",
-    LINK_CLICK_HERE: 'The phrase "click" or "click here" places focus on mouse mechanics, when many people do not use a mouse or may be viewing this website on a mobile device. Consider using a different verb that relates to the task. <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
-    DUPLICATE_TITLE: 'The <code>title</code> attribute on links and images is meant to provide extra information, and should be <strong>different</strong> than the text or alt text. The title text appears when hovering over an element, but is not accessible with a keyboard or touch input. Consider <a href="https://www.a11yproject.com/posts/title-attributes/">avoiding the title attribute completely.</a>',
-    LINK_SYMBOLS: "Avoid using symbols as calls to action within link text unless they are hidden from assistive technologies. Screen readers may read the symbols out loud, which can be confusing. Consider removing: <strong {C}>%(ERROR)</strong> <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
-    LINK_URL: "Longer, less intelligible URLs used as link text might be difficult to comprehend with assistive technology. In most cases, it is better to use human-readable text instead of the URL. Short URLs (such as a site's homepage) are okay. <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
-    LINK_DOI: 'For web pages or online-only resources, the <a href="https://apastyle.apa.org/style-grammar-guidelines/paper-format/accessibility/urls#:~:text=descriptive%20links">APA Style guide</a> recommends using descriptive links by wrapping the URL or DOI of the work around its title. Longer, less intelligible URLs used as link text might be difficult to comprehend with assistive technology. <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
-    LINK_NEW_TAB: `Link opens in a new tab or window without warning. Doing so can be disorienting, especially for people who have difficulty perceiving visual content. Secondly, it is not always a good practice to control someone's experience or make decisions for them. Indicate that the link opens in a new window within the link text. Learn best practices when <a href="https://www.nngroup.com/articles/new-browser-windows-and-tabs/">opening links in new browser windows and tabs.</a>`,
-    LINK_FILE_EXT: 'Link points to a PDF or downloadable file (e.g. MP3, Zip, Word Doc) without warning. Indicate the file type within the link text. If it is a large file, consider including the file size. For example: "Executive Report (PDF, 3MB)" <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
-    LINK_IDENTICAL_NAME: "Multiple links on this page use the same link text but point to different places. This may cause confusion for assistive technology users. To fix, make this link text more descriptive.",
-    LINK_UNPRONOUNCEABLE: "Link text only contains symbols. If you think this link is an error due to a copy/paste bug, consider deleting it.  <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
-    // Images
-    ALT_UNPRONOUNCEABLE: "The alt text only contains unpronounceable symbols and/or spaces. Screen readers will announce the image and then pause. If the image is decorative, ensure there are no spaces within the alt text. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    LINK_ALT_UNPRONOUNCEABLE: "The alt text within this linked image only contains unpronounceable symbols and/or spaces. Screen readers will announce the image and then pause. Ensure the alt text describes the destination of the link. <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    MISSING_ALT_LINK_HAS_TEXT: "Image is being used as a link with surrounding text, although the alt attribute should be marked as decorative.",
-    MISSING_ALT_LINK: "Image is being used as a link but is missing alt text! Please ensure alt text describes where the link takes you.",
-    MISSING_ALT: "Missing alt text! If the image conveys a story, mood, or important information, make sure to describe it clearly.",
-    LINK_ALT_FILE_EXT: "Alt text should not include file extensions or image dimensions. Ensure the alt text describes the destination of the link, not a literal description of the image. Remove: <strong {C}>%(ERROR)</strong> <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    LINK_PLACEHOLDER_ALT: "Non-descript or placeholder alt text within a linked image found. Ensure the alt text describes the destination of the link, not a literal description of the image. Replace the following alt text. <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    LINK_SUS_ALT: "Assistive technologies already indicate that this is an image, so &quot;<strong {C}>%(ERROR)</strong>&quot; may be redundant. Ensure the alt text describes the destination of the link, not a literal description of the image. <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    ALT_FILE_EXT: "Alt text should not include file extensions or image dimensions. If the image conveys a story, mood, or important information, be sure to describe the image. Remove: <strong {C}>%(ERROR)</strong>. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    ALT_PLACEHOLDER: "Non-descript or placeholder alt text found. Replace the following alt text with something more meaningful. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    SUS_ALT: "Assistive technologies already indicate that this is an image, so &quot;<strong {C}>%(ERROR)</strong>&quot; may be redundant. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    LINK_IMAGE_NO_ALT_TEXT: "Image within link is marked as decorative and there is no link text. Please add alt text to the image that describes the destination of the link.",
-    LINK_IMAGE_TEXT: "Image is marked as decorative, although the link is using the surrounding text as a descriptive label.",
-    LINK_IMAGE_LONG_ALT: "Alt text description on a linked image is <strong>too long</strong>. The alt text on linked images should describe where the link takes you, not a literal description of the image. <strong>Consider using the title of the page it links to as the alt text.</strong> <hr> {L} {ALT} <strong {B}>%(altLength) Characters</strong> <strong {C}>%(ALT_TEXT)</strong>",
-    LINK_IMAGE_ALT: "Image link contains alt text. Does the alt text describe where the link takes you? <strong>Consider using the title of the page it links to as the alt text.</strong> <hr> {L} {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    LINK_IMAGE_ALT_AND_TEXT: "Image link contains <strong>both alt text and surrounding link text.</strong> If this image is decorative and is being used as a functional link to another page, consider marking the image as decorative. The surrounding link text should suffice. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong> <hr> <strong {B}>Accessible Name</strong> {L} <strong {C}>%(TEXT)</strong>",
-    IMAGE_FIGURE_DECORATIVE: 'Image is marked as <strong>decorative</strong> and will be ignored by assistive technology. <hr> Although a <strong>caption</strong> was provided, the image should also have alt text in most cases. <ul><li>The alt text should provide a concise description of what is in the image.</li><li>The caption should usually provide context to relate the image back to the surrounding content, or give attention to a particular piece of information.</li></ul> Learn more: <a href="https://thoughtbot.com/blog/alt-vs-figcaption#the-figcaption-element">alt versus figcaption.</a>',
-    IMAGE_FIGURE_DUPLICATE_ALT: 'Do not use the exact same words for both the alt and caption text. Screen readers will announce the information twice.<ul><li>The alt text should provide a concise description of what is in the image.</li><li>The caption should usually provide context to relate the image back to the surrounding content, or give attention to a particular piece of information.</li></ul> Learn more: <a href="https://thoughtbot.com/blog/alt-vs-figcaption#the-figcaption-element">alt versus figcaption.</a> <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>',
-    IMAGE_DECORATIVE: "Image is marked as <strong>decorative</strong> and will be ignored by assistive technology. If the image conveys a story, mood, or important information, make sure to add alt text.",
-    IMAGE_DECORATIVE_CAROUSEL: "Image is marked as <strong>decorative</strong>, but all images in a carousel or gallery should include descriptive alt text to ensure an equivalent experience for everyone.",
-    IMAGE_ALT_TOO_LONG: "Alt text description is <strong>too long</strong>. Alt text should be concise, yet meaningful like a <em>tweet</em> (around 100 characters). If this is a complex image or a graph, consider putting the long description of the image in the text below or an accordion component. <hr> {ALT} <strong {B}>%(altLength) Characters</strong> <strong {C}>%(ALT_TEXT)</strong>",
-    IMAGE_PASS: "{ALT} %(ALT_TEXT)",
-    LINK_ALT_MAYBE_BAD: "Image link has alt text that may not provide useful information or contains non-descript text. Ensure the alt text describes the destination of the link. <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    ALT_MAYBE_BAD: "Alt text may not provide useful information or contains non-descript text. Improve the following alt text: <hr> {ALT} <strong {C}>%(ALT_TEXT)</strong>",
-    // Labels
-    LABELS_MISSING_IMAGE_INPUT: "Image button is missing alt text. Please add alt text to provide an accessible name. For example: <em>Search</em> or <em>Submit</em>.",
-    LABELS_INPUT_RESET: 'Reset buttons should not be used unless specifically needed because they are easy to activate by mistake. <hr> <strong>Tip!</strong> Learn why <a href="https://www.nngroup.com/articles/reset-and-cancel-buttons/">Reset and Cancel buttons pose usability issues.</a>',
-    LABELS_ARIA_LABEL_INPUT: "Input has an accessible name, although please ensure there is a visible label too. <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>",
-    LABELS_NO_FOR_ATTRIBUTE: "There is no label associated with this input. Add a <code>for</code> attribute to the label that matches the <code>id</code> of this input. <hr> <strong {B}>ID</strong> <strong {C}>#%(id)</strong>",
-    LABELS_MISSING_LABEL: "There is no label associated with this input. Please add an <code>id</code> to this input, and add a matching <code>for</code> attribute to the label.",
-    LABELS_PLACEHOLDER: 'Disappearing placeholder text makes it hard for people to remember what information belongs in a field and to identify and correct validation issues. Instead, consider using a permanently visible hint before the form field. <hr> Learn more: <a href="https://www.nngroup.com/articles/form-design-placeholders/">Placeholders in form fields are harmful.</a>',
-    ARIA_INPUT_FIELD_NAME: "ARIA input or toggle field is missing an accessible name. To fix, provide a valid <code>aria-labelledby</code>, <code>aria-label</code>, or <code>title</code> attribute. If the input is toggleable (e.g., checkbox, switch, radio), adding visible inner text will also resolve this. <hr> <strong {B}>Element</strong> <pre><code>%(EL)</code></pre>",
-    // Embedded content
-    EMBED_VIDEO: "Please ensure <strong>all videos have closed captioning.</strong> Providing captions for all audio and video content is a mandatory Level A requirement. Captions support people who are D/deaf or hard-of-hearing.",
-    EMBED_AUDIO: "Please ensure to provide a <strong>transcript for all podcasts.</strong> Providing transcripts for audio content is a mandatory Level A requirement. Transcripts support people who are D/deaf or hard-of-hearing, but can benefit everyone. Consider placing the transcript below or within an accordion panel.",
-    EMBED_DATA_VIZ: `Data visualization widgets like this are often problematic for people who use a keyboard or screen reader to navigate, and can present significant difficulties for people who have low vision or colorblindness. It's recommended to provide the same information in an alternative (text or table) format below the widget. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/images/complex">complex images.</a>`,
-    EMBED_MISSING_TITLE: 'Embedded content requires an accessible name that describes its contents. Please provide a unique <code>title</code> or <code>aria-label</code> attribute on the <code>iframe</code> element. Learn more about <a href="https://web.dev/learn/accessibility/more-html#iframes">iFrames.</a>',
-    EMBED_GENERAL: 'Unable to check embedded content. Please make sure that images have alt text, videos have captions, text has sufficient contrast, and interactive components are <a href="https://webaim.org/techniques/keyboard/">keyboard accessible.</a>',
-    EMBED_UNFOCUSABLE: '<code>&lt;iframe&gt;</code> with focusable elements should not have <code>tabindex="-1"</code>. The embedded content will not be keyboard accessible.',
-    // Quality assurance
-    QA_BAD_LINK: "Bad link found. Link appears to point to a development environment. <hr> {L} <strong {C}>%(LINK)</strong>",
-    QA_STRONG_ITALICS: "Bold and italic tags have semantic meaning, and should <strong>not</strong> be used to highlight entire paragraphs. Bolded text should be used to provide strong <strong>emphasis</strong> on a word or phrase. Italics should be used to highlight proper names (i.e. book and article titles), foreign words, quotes. Long quotes should be formatted as a blockquote. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    QA_PDF: 'Unable to check PDFs for accessibility. PDFs are considered web content and must be made accessible as well. PDFs often contain issues for people who use screen readers (missing structural tags or missing form field labels) and people who have low vision (text does not reflow when enlarged). <ul><li>If this is a form, consider using an accessible HTML form as an alternative.</li><li>If this is a document, consider converting it into a web page.</li></ul>Otherwise, please check <a href="https://helpx.adobe.com/acrobat/using/create-verify-pdf-accessibility.html">PDF for accessibility in Acrobat DC.</a> <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
-    QA_DOCUMENT: 'Unable to check document for accessibility. Linked documents are considered web content and must be made accessible as well. Please manually review this document. <ul><li>Make your <a href="https://support.google.com/docs/answer/6199477?hl=en">Google Workspace document or presentation more accessible.</a></li><li>Make your <a href="https://support.microsoft.com/en-us/office/create-accessible-office-documents-868ecfcd-4f00-4224-b881-a65537a7c155">Office documents more accessible.</a></li></ul> <hr> <strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>',
-    QA_BLOCKQUOTE: "Should this blockquote be a heading? Blockquotes should be used for quotes only. If this is intended to be a heading, change this blockquote to a semantic heading (e.g. Heading 2 or Heading 3). <hr> <strong {B}>Blockquote</strong> <strong {C}>%(TEXT)</strong>",
-    QA_FAKE_HEADING: "Is this a heading? A line of bold or large text might look like a heading, but someone using a screen reader cannot tell that it is important or jump to its content. Bold or large text should never replace semantic headings (Heading 2 to Heading 6). <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    QA_FAKE_LIST: 'Are you trying to create a list? Possible list item found: <strong {C}>%(PREFIX)</strong> <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong> <hr> Make sure to use semantic lists by using the bullet or number formatting buttons instead. When using a semantic list, assistive technologies are able to convey information such as the total number of items and the relative position of each item in the list. Learn more about <a href="https://www.w3.org/WAI/tutorials/page-structure/content/#lists">semantic lists.</a>',
-    QA_UPPERCASE: "Found all caps. Some screen readers may interpret all caps text as an acronym and will read each letter individually. Additionally, some people find all caps more difficult to read and it may give the appearance of SHOUTING. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    QA_UNDERLINE: "Underlined text can be confused with links. Consider using a different style such as <code>&lt;strong&gt;</code><strong>strong importance</strong><code>&lt;/strong&gt;</code> or <code>&lt;em&gt;</code><em>emphasis</em><code>&lt;/em&gt;</code>. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    QA_SUBSCRIPT: "The subscript and superscript formatting options should only be used to change the position of text for typographical conventions or standards. It should <strong>not</strong> solely be used for presentation or appearance purposes. Formatting entire sentences poses readability issues. Appropriate use cases would include displaying exponents, ordinal numbers such as 4<sup>th</sup> instead of fourth, and chemical formulas (e.g. H<sub>2</sub>O). <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    QA_IN_PAGE_LINK: "Broken same-page link. This link tries to navigate to a section of the page that cannot be found. To fix this, make sure the link matches the <code>id</code> of the element you want to jump to. <hr> <strong {B}>ID</strong> <strong {C}>#%(ID)</strong>",
-    QA_NESTED_COMPONENTS: "Avoid nesting interactive layout components, such as placing accordions within other accordions, or placing tabs inside accordions and vice versa. This can complicate navigation, increase cognitive overload, and lead to people overlooking content.",
-    QA_JUSTIFY: "Avoid using justified text, which aligns to both the left and right margins. This can be difficult for some people to read due to the uneven spaces between words. Use left-aligned text for better readability. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    QA_SMALL_TEXT: "Small text is harder to read, particularly for those with low vision. To ensure better readability, avoid using font sizes smaller than the default. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    // Shared
-    LINK_TEXT: "<strong {B}>Link text</strong> <strong {C}>%(TEXT)</strong>",
-    ACC_NAME: "<strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>",
-    ACC_NAME_TIP: `<hr><strong>Tip!</strong> The "accessible name" is the final label that gets communicated to people who use assistive technology. This helps them understand the element's purpose.`,
-    HIDDEN_FOCUSABLE: 'This element can receive keyboard focus, but is hidden from screen readers by an <code>aria-hidden="true"</code> attribute (on itself or a parent container). To fix, either remove the aria-hidden attribute or remove the element from the tab order. <hr> <strong {B}>Element</strong> <pre><code>%(EL)</code></pre> <hr> Learn more about the <a href="https://developer.mozilla.org/en-US/docs/Web/Accessibility/ARIA/Attributes/aria-hidden">aria-hidden attribute.</a>',
-    // Developer checks
-    DUPLICATE_ID: "Found <strong>duplicate ID</strong>. Duplicate ID errors are known to cause problems for assistive technologies when they are trying to interact with content. Please remove or change the following ID. <hr> <strong {B}>ID</strong> <strong {C}>#%(id)</strong>",
-    UNCONTAINED_LI: "All <code>&lt;li&gt;</code> list items must be placed inside <code>&lt;ul&gt;</code> unordered or <code>&lt;ol&gt;</code> ordered elements. This structure helps screen readers announce the list and its items accurately. <hr> <strong {B}>List item</strong> <strong {C}>%(TEXT)</strong>",
-    TABINDEX_ATTR: "Element should not have a <code>tabindex</code> attribute greater than 0.",
-    // Meta checks
-    META_TITLE: 'Missing page title! Please provide a <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Element/title">page title.</a>',
-    META_SCALABLE: 'Remove the <code>user-scalable="no"</code> parameter in the <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Viewport_meta_tag">viewport meta tag</a> in order to allow zooming.',
-    META_MAX: 'Ensure the <code>maximum-scale</code> parameter in the <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Viewport_meta_tag">viewport meta tag</a> is not less than 2.',
-    META_LANG: 'Page language not declared! Please <a href="https://www.w3.org/International/questions/qa-html-language-declarations">declare language on the HTML tag.</a>',
-    META_REFRESH: "Page should not automatically refresh using a meta tag.",
-    META_LANG_SUGGEST: "The following language code <code>%(CODE)</code> is not valid. Did you mean <code>%(CODE)</code>?",
-    META_LANG_VALID: 'The language code for this element is not valid. To fix, replace the lang attribute with a valid language code. <hr> <strong {B}>Element</strong> <code>&lt;%(ELEMENT) lang="%(CODE)"&gt;</code> <hr> Learn more about <a href="https://www.w3.org/International/questions/qa-html-language-declarations">declaring language in HTML.</a>',
-    // Buttons
-    BTN_EMPTY: "Button is missing an accessible name that describes its purpose.",
-    BTN_EMPTY_LABELLEDBY: "Button has an <code>aria-labelledby</code> value that is empty or does not match the <code>id</code> value of another element on the page.",
-    BTN: "button",
-    BTN_TIP: ' Learn how to make an <a href="https://www.sarasoueidan.com/blog/accessible-icon-buttons/">accessible button.</a>',
-    BTN_ROLE_IN_NAME: 'Do not include the word "button" in the name of a button. Screen readers already convey the role of an element in addition to its name. <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>',
-    LABEL_IN_NAME: "The visible text for this element appears to be different than the accessible name, which may cause confusion for assistive technologies users. Please review: <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong> <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong>",
-    LINK_MAYBE_BUTTON: `This link has an invalid target. Although the accessible name or its attributes suggests that this might not be a link at all, and instead controls some scripted behaviour on the page. To fix, replace the link with an <a href="https://www.w3.org/WAI/ARIA/apg/patterns/button/">accessible button</a>, or correct the link's destination. <hr> <strong {B}>Accessible Name</strong> <strong {C}>%(TEXT)</strong> <hr> <strong>Tip!</strong> Assistive technologies treat buttons and links differently. Using the correct HTML element ensures users know which keyboard shortcuts to use and what action will trigger.`,
-    POTENTIAL_UI_ELEMENTS: [
-      "menu",
-      "close",
-      "toggle",
-      "open",
-      "expand",
-      "collapse",
-      "next",
-      "prev",
-      "previous",
-      "play",
-      "pause",
-      "submenu",
-      "show",
-      "hide",
-      "dropdown",
-      "back",
-      "forward",
-      "skip",
-      "submit",
-      "cancel",
-      "save",
-      "edit",
-      "delete",
-      "remove",
-      "search",
-      "filter",
-      "sort",
-      "stop",
-      "mute",
-      "unmute",
-      "fullscreen",
-      "minimize",
-      "maximize",
-      "slide",
-      "modal"
-    ],
-    // Tables
-    TABLES_MISSING_HEADINGS: 'Missing table headers! Accessible tables need HTML markup that indicates header cells and data cells which defines their relationship. This information provides context to people who use assistive technology. Tables should be used for tabular data only. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/tables/">accessible tables.</a>',
-    TABLES_SEMANTIC_HEADING: 'Semantic headings such as Heading 2 or Heading 3 should only be used for sections of content; <strong>not</strong> in HTML tables. Indicate table headings using the <code>&lt;th&gt;</code> element instead. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/tables/">accessible tables.</a>',
-    TABLES_EMPTY_HEADING: 'Empty table header found! Table headers should <strong>never</strong> be empty. It is important to designate row and/or column headers to convey their relationship. This information provides context to people who use assistive technology. Please keep in mind that tables should be used for tabular data only. <hr> Learn more about <a href="https://www.w3.org/WAI/tutorials/tables/">accessible tables.</a>',
-    TABLES_INVALID_HEADERS_REF: 'This table is attempting to label a specific data cell with a specific header cell, but the header ID cannot be found. Make sure each <code>headers</code> attribute matches the ID of a header cell in the same table. <hr> <strong {B}>Headers</strong> <code>%(VALUE)</code> <hr> <strong>Tip!</strong> <a href="https://www.w3.org/WAI/WCAG22/Techniques/html/H43">Using manual ID references</a> to associate data cells with header cells is complicated and fragile. When possible, break complex data into smaller tables with simple header rows and columns.',
-    // Contrast
-    CONTRAST_NORMAL: "Normal-sized text should have at least a %(RATIO) ratio.",
-    CONTRAST_LARGE: "Large-sized text should have at least a %(RATIO) ratio.",
-    CONTRAST_ERROR: "Text does not have enough contrast with the background, making it harder to read.",
-    CONTRAST_WARNING: "The contrast of this text is unknown and needs to be manually reviewed. Ensure the text and the background have strong contrasting colors.",
-    CONTRAST_ERROR_GRAPHIC: "Graphic does not have enough contrast with the background, making it harder to see.",
-    CONTRAST_WARNING_GRAPHIC: "The contrast of this graphic is unknown and needs to be manually reviewed.",
-    CONTRAST_TIP_GRAPHIC: "Graphics and user interface elements should have at least a 3:1 ratio.",
-    CONTRAST_OPACITY: "Increase the opacity for better visibility.",
-    CONTRAST_APCA: "This is not enough contrast for any size text. Consider using this color and text size combination?",
-    CONTRAST_COLOR: "Consider using this color instead?",
-    CONTRAST_SIZE: "Consider making the text size larger for this color combination?",
-    CONTRAST_PLACEHOLDER: "Placeholder text within this input does not have enough contrast with the background, making it harder to read.",
-    CONTRAST_PLACEHOLDER_UNSUPPORTED: "The contrast of this placeholder text is unknown and needs to be manually reviewed. Ensure the text and the background have strong contrasting colours.",
-    CONTRAST_INPUT: "Text within this input does not have enough contrast with the background, making it harder to read.",
-    CONTRAST: "Contrast",
-    UNKNOWN: "Unknown",
-    FG: "Foreground",
-    BG: "Background",
-    NO_SUGGESTION: "No accessible combination can be found by changing the text color. Try changing the background color.",
-    // Language of parts
-    PAGE_LANG_CONFIDENCE: 'More than half of the text on this page appears to be %(LIKELY_LANG), but the declared page language is %(PAGE_LANG). Consider updating the <a href="https://www.w3.org/International/questions/qa-html-language-declarations">declared page language</a> to match the content.',
-    LANG_OF_PARTS: "The page language was declared as %(PAGE_LANG), but this content appears to be %(LIKELY_LANG). Ensure the content is tagged appropriately. <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    LANG_MISMATCH: "This content appears to be %(DETECTED_LANG), however, it was tagged as %(WRONG_LANG). <hr> <strong {B}>Text</strong> <strong {C}>%(TEXT)</strong>",
-    LANG_OF_PARTS_ALT: "This alt text appears to be %(LIKELY_LANG), but the page language was declared as %(PAGE_LANG). Ensure the alt text is in the same language as the rest of the page. <hr> {ALT} <strong {C}>%(ALT)</strong>",
-    LANG_TIP: '<hr><strong>Tip!</strong> Screen readers pronounce words using language tags. Pronouncing a language with a mismatched language pack produces unintelligible speech. Learn more about <a href="https://www.w3.org/WAI/WCAG22/Understanding/language-of-parts.html">language of parts.</a>',
-    LANG_UNSUPPORTED: "Language-related accessibility checks were skipped because automatic language detection isn’t supported in this browser."
-  }
+    ...ui,
+    ...ruleset,
+    ...tooltip
+  },
+  ruleset
 };
 const testNames = {
   ALT_FILE_EXT: "This alt text is a filename, not a description",
@@ -8338,6 +10128,7 @@ const testNames = {
   ALT_UNPRONOUNCEABLE: "This alt text is unpronounceable",
   ARIA_INPUT_FIELD_NAME: "This custom input field is missing a label",
   BTN_EMPTY: "Button is missing an accessible label",
+  BTN_UNPRONOUNCEABLE: "This button is unpronounceable",
   BTN_EMPTY_LABELLEDBY: "Button has an invalid ARIA label",
   BTN_ROLE_IN_NAME: 'Button name repeats the word "button"',
   CONTRAST_ERROR: "Text does not have enough contrast to be easily legible",
@@ -8355,12 +10146,14 @@ const testNames = {
   EMBED_MISSING_TITLE: 'Frame missing "title" attribute',
   EMBED_UNFOCUSABLE: 'Frame with tabindex="-1" will not be keyboard accessible.',
   EMBED_VIDEO: "Is this video accurately captioned?",
+  EMBED_VIDEO_AUTOPLAY: "Is there a way for users to pause this video?",
   HEADING_EMPTY: "This heading has no text",
   HEADING_EMPTY_WITH_IMAGE: "This image is used as a heading, so it needs alt text",
   HEADING_FIRST: "The first heading on this page is a subheading",
   HEADING_LONG: "Can this heading be shorter?",
   HEADING_MISSING_ONE: "This page is missing a Heading 1",
   HEADING_SKIPPED_LEVEL: "This heading is tagged at the wrong level",
+  HEADING_UNPRONOUNCEABLE: "This heading is unpronounceable",
   HIDDEN_FOCUSABLE: "This element cannot be described by screen readers",
   IMAGE_ALT_TOO_LONG: "Can this alt text be shorter?",
   IMAGE_DECORATIVE: "Is this image actually meaningless?",
@@ -8397,6 +10190,28 @@ const testNames = {
   LINK_LABEL: "Link label",
   LINK_MAYBE_BUTTON: "Is this link actually a button?",
   LINK_NEW_TAB: "Does this link open a new tab without warning?",
+  // Link checker results (see rulesets/broken-links.js).
+  HREF_BROKEN: "This link is broken",
+  HREF_UNPUBLISHED: "Did you mean to link to an unpublished page?",
+  HREF_MARKED_BROKEN: "This link was marked broken by an editor",
+  HREF_ACCESS: "Did you mean to link to password-protected content?",
+  HREF_UNVERIFIABLE: "This link needs a manual check",
+  HREF_REDIRECT: "This link redirects to a different site",
+  HREF_SERVER_ERROR: "The linked site may be down",
+  // Link checker reasons, which refine the statuses above.
+  HREF_BAD_HOST: "This link is broken",
+  HREF_MALFORMED: "This link address has a typo",
+  HREF_SCHEME_TYPO: "This link address starts with a typo",
+  HREF_MISSING_HTTPS: 'This link is missing "https://"',
+  HREF_MISSING_MAILTO: 'This email link is missing "mailto:"',
+  HREF_EMAIL_INVALID: "This email link has no valid address",
+  HREF_PHONE_INVALID: "This phone link has no number to dial",
+  HREF_LOCAL_FILE: `This link points to a file on someone's computer`,
+  HREF_PRIVATE: "This link needs a manual check",
+  HREF_USERINFO: "This link contains a username or password",
+  HREF_FTP: "FTP links no longer open in browsers",
+  HREF_APP_LINK: "This link opens an app",
+  HREF_REDIRECT_APP: "This link redirects to an app or email address",
   LINK_PLACEHOLDER_ALT: "This linked alt text may be a placeholder",
   LINK_STOPWORD: "This link only contains generic words",
   LINK_STOPWORD_ARIA: "The purpose of this link is visually hidden",
@@ -8410,6 +10225,7 @@ const testNames = {
   META_REFRESH: "Meta tag automatically refreshes page",
   META_SCALABLE: "Meta tag prevents users from enlarging text",
   META_TITLE: "Meta tag for page title missing",
+  META_TITLE_UNDESCRIPTIVE: "Does the page title uniquely describe the content?",
   MISSING_ALT: "Invalid HTML: image has no alt attribute",
   MISSING_ALT_LINK: "Invalid HTML: linked image missing alt attribute",
   MISSING_ALT_LINK_HAS_TEXT: "Invalid HTML: image in link missing alt attribute",
@@ -8428,12 +10244,16 @@ const testNames = {
   QA_SUBSCRIPT: "Do not use sub/superscript as visual formatting",
   QA_UNDERLINE: "Only links should be underlined",
   QA_UPPERCASE: "Is this uppercase text needed?",
+  SUMMARY_EMPTY: "This details element is missing its summary",
   SUS_ALT: "Are there redundant words in this alt text?",
+  SVG_NO_ACCESSIBLE_NAME: "This SVG has no accessible name",
   TABINDEX_ATTR: "Tabindex overrides interrupt the focus order",
   TABLES_EMPTY_HEADING: "This header cell needs text",
   TABLES_INVALID_HEADERS_REF: "This table has an invalid headers attribute",
   TABLES_MISSING_HEADINGS: "This table needs a header row and/or column",
   TABLES_SEMANTIC_HEADING: "Content headings should not be used inside tables",
+  TABLES_SINGLE_CELL: "Use another element instead of a single cell table",
+  TABLES_SINGLE_COLUMN: "Use another element instead of a single column table",
   UNCONTAINED_LI: "Invalid HTML list"
 };
 const why = {
@@ -8456,6 +10276,7 @@ const tips = {
   BTN_EMPTY_LABELLEDBY: `<p>This button has an <code>aria-labelledby</code> value that is empty or does not match the <code>ID</code> value of another element on the page.</p><p>${why.fix}Reconnect the ID to an element on the page, or remove this attribute and describe the button in another way.</p>`,
   BTN_TIP: `${why.buttons}`,
   BTN_ROLE_IN_NAME: `<p><strong>Label for screen readers:</strong> <i>%(TEXT)</i></p><p>Screen readers use the word "button" to announce they are describing a button, so this word is repetitive.</p><p>${why.fix}The button's label should match its action. If the visible label is an icon instead of text, label the button with the icon's meaning, e.g. "Play," "Search" or "Menu."</p>`,
+  BTN_UNPRONOUNCEABLE: `<p><strong>Button text:</strong> <i>%(TEXT)</i></p><p>${why.fix}Add text, a title or an aria-label describing what it does.</p><div class="why"><p>Tip: screen readers cannot describe buttons that only contain spaces or symbols. They either fall silent ("Button, [...awkward pause where the button label should be...]"), or read the name of the symbol.</p></div>`,
   CONTRAST_WARNING: "A background image or gradient means this checker is not sure what color is behind this text. Use the color picker below to check manually.",
   DUPLICATE_ID: `<p>IDs are being used on this page for labels or link targets, which means they must be unique.</p><p>${why.fix}Change this ID: <code>#%(ID)</code></p><div class="why"><p>In most content management systems, this comes from a field called "name" or "id" in the element properties. In HTML, it is an attribute: <code>&lt;a id="MY-ID"&gt;</code></p></div>`,
   DUPLICATE_TITLE: `<p>${why.fix}Delete the link's text or <code>title</code> attribute.</p><div class="why"><p>Tip: <code>title</code> tooltips only appear when hovering with a mouse. They cannot be seen when navigating on a phone or with a keyboard, so many users will never see them. They should never contain unique or important information.</p></div>`,
@@ -8465,7 +10286,9 @@ const tips = {
   EMBED_MISSING_TITLE: `<p>Embeds need an accessible name that describes their contents for screen readers.</p><p>${why.fix}Provide a unique <code>title</code> or <code>aria-label</code> attribute.</p>`,
   EMBED_UNFOCUSABLE: `<p>This attribute tells keyboards and assistive devices to skip over the element. Remove this attribute unless the iframe has no links, buttons, form elements, or scrollable content.</p>`,
   EMBED_VIDEO: `<p>This checker cannot "see" whether videos have captions, or tell if someone has proofread them, so a manual check is needed.</p><p>${why.fix}Check to make sure that <a href="https://www.w3.org/WAI/media/av/captions/">accurate captions ("CC") or subtitles</a> are available, and make sure speakers and meaningful sound effects are accurately identified.</p>`,
+  EMBED_VIDEO_AUTOPLAY: `<p>People prone to motion sickness and cognitive overload <a href="https://www.w3.org/WAI/WCAG21/Understanding/pause-stop-hide.html">need a way to pause videos</a>.</p><p>${why.fix}Add the <code>controls</code> attribute, provide a visible pause button, or remove the <code>autoplay</code> attribute.</p>`,
   HEADING_EMPTY: `<p>Empty headings create confusing gaps in the page outline.</p><p>${why.fix}Add text to this heading, or delete this empty line.</p>${why.headings}`,
+  HEADING_UNPRONOUNCEABLE: `<p>Empty headings create confusing gaps in the page outline.</p><p>${why.fix}Add human-readable text to this heading, or convert it to a paragraph.</p>${why.headings}`,
   HEADING_EMPTY_WITH_IMAGE: `<p>Empty headings create confusing gaps in the page outline.</p><p>${why.fix}If this is not a heading, change its format from <code>Heading %(level)</code> to <code>Paragraph</code>. Otherwise, put the meaning of the image in its alt.</p>${why.headings}`,
   HEADING_FIRST: `${why.fix}Make sure the page title is marked as a Heading 1 or Heading 2. ${why.headings}`,
   HEADING_LONG: `<p>${why.fix}Unless this heading is a fixed reference like the title of a published article, shorten it to help people skim:<span hidden>%(drop)%(drop)</span></p><p><i>%(TEXT)</i></p>${why.headings}`,
@@ -8481,9 +10304,9 @@ const tips = {
   LABELS_INPUT_RESET: `<p>Reset buttons are easy to activate by mistake, causing data loss without an opportunity to cancel or undo.</p><p>${why.fix}Unless this is resetting a single field, consider removing it or providing a method to cancel before executing the action.</p>`,
   LABELS_MISSING_IMAGE_INPUT: "Image button is missing alt text. Please add alt text to provide an accessible name. For example: <em>Search</em> or <em>Submit</em>.",
   LABELS_MISSING_LABEL: `<p>${why.fix}Add an <code>id</code> to this input, and add a matching <code>for</code> attribute to the label.</p>`,
-  LABELS_NO_FOR_ATTRIBUTE: "There is no label associated with this input. Add a <code>for</code> attribute to the label that matches the <code>id</code> of this input. <hr> <strong>ID:</strong> <code>#%(ID)</code>",
+  LABELS_NO_FOR_ATTRIBUTE: "<p>There is no label associated with this input. Add a <code>for</code> attribute to the label that matches the <code>id</code> of this input.</p><p><strong>ID:</strong> <code>#%(ID)</code></p>",
   LABELS_PLACEHOLDER: `<p>Placeholder text can be mistaken for previously entered content if it has good contrast, or be illegible if it does not. It then disappears on input, which may remove information users needed to check for errors.</p><p>${why.fix}Make sure key information like the field label, help text and format instructions remain visible when there is content in this field, and consider dropping the placeholder altogether.</p>`,
-  LABEL_IN_NAME: `<p><strong>Visible text:</strong> <i>%(VISIBLE)</i></p><p><strong>Label for screen readers:</strong> <i>%(LABEL)</i></p><p>The visible text for this element appears to be different from the accessible name. This may cause confusion for screen reader users, and may break voice control.</p><p>${why.fix}Make sure the visible label starts with the text of the invisible label, and does not contain any meaningful information that is missing from the invisible label.</p>`,
+  LABEL_IN_NAME: `<p><strong>Visible text:</strong> <i>%(VISIBLE)</i></p><p><strong>Label for screen readers:</strong> <i>%(LABEL)</i></p><p>The visible text for this element appears to be different from the accessible name. This may cause confusion for screen reader users, and may break voice control.</p><p>${why.fix}Make sure the invisible label starts with the text of the visible label, and does not contain any meaningful information that is missing from the visible label.</p>`,
   LINK_ALT_FILE_EXT: `<p>This alt text is probably a filename instead of a meaningful label for a link:<br><span hidden>%(ALT)</span><i>%(alt)</i></p><p>${why.fix}Use the title of the link destination as alt text for linked images.</p><div class="why"> <p>The purpose of alt text is to provide an alternative for what an image means, not what it contains. The meaning of a linked image is the link destination:</p><ul><li>"Page with writing" describes the image, not a link.</li><li>"IMG_1234.jpg" is just a filename.</li><li>"Event registration form (.doc)" is a link destination.</li></ul></div>`,
   LINK_ALT_MAYBE_BAD: `<p><strong>Alt text:</strong> <i>%(alt)</i></p><p>${why.fix}Use the title of the link destination as alt text for linked images.</p>${why.imageLinks}`,
   LINK_ALT_MAYBE_BAD_WARNING: `<p><strong>Alt text:</strong> <i>%(alt)</i></p><p>${why.fix}Use the title of the link destination as alt text for linked images.</p>${why.imageLinks}`,
@@ -8491,7 +10314,7 @@ const tips = {
   LINK_CLICK_HERE: `<p><strong>Link text:</strong> <i>%(TEXT)</i></p><p>${why.fix}Remove redundant words that distract from the link's purpose.</p>${why.links}`,
   LINK_DOI: `<p><strong>Link text:</strong> <i>%(TEXT)</i></p><p>${why.fix}Link the article title and provide the DOI number as plain text, rather than linking the DOI number and leaving the article title as plain text.</p><div class="why"><p>The <a href="https://apastyle.apa.org/style-grammar-guidelines/paper-format/accessibility/urls#:~:text=descriptive%20links">APA Style guide</a> recommends using descriptive links on websites because users skim by links and use in-page search for links by name. Users are much more likely to notice articles of interest when the title is linked.</p><p>This also allows screen readers to describe each link meaningfully, rather than speaking a meaningless sequence of numbers.</p></div>`,
   LINK_EMPTY: `<p>${why.fix}Add text describing its destination, or delete it if it is just a typo or linked space character.</p><div class="why"><p>Tip: screen readers cannot describe links that only contain spaces or symbols. They either fall silent ("Link, [...awkward pause where the link title should be...]"), or read the URL: "Link, H-T-T-P-S forward-slash forward-slash example dot com."</p><p>Note that linked space characters can be hard to delete in some content editors; it is sometimes necessary to delete "across the gap" by removing and retyping the words on both sides of a linked space.</p></div>`,
-  LINK_EMPTY_LABELLEDBY: `<p>This link has an <code>aria-labelledby</code> attribute that does not match the <code>ID</code> of any element on the page.</p><p>${why.fix}Provide a valid <code>ID</code>, or remove this attribute and describe the button in another way.</p>`,
+  LINK_EMPTY_LABELLEDBY: `<p>This link has an <code>aria-labelledby</code> attribute that does not match the <code>ID</code> of any element on the page.</p><p>${why.fix}Provide a valid <code>ID</code>, or remove this attribute and describe the link in another way.</p>`,
   LINK_EMPTY_NO_LABEL: `<p>${why.fix}Add text describing its destination, or delete it if it is just a typo like a linked space character.</p><div class="why"><p>Tip: screen readers cannot describe empty links. They either fall silent ("Link, [...awkward pause where the link title should be...]"), or read the URL: "Link, H-T-T-P-S forward-slash forward-slash example dot com."</p><p>Note that linked space characters can be hard to delete in some content editors; it is sometimes necessary to delete "across the gap" by removing and retyping the words on both sides of a linked space.</p></div>`,
   LINK_UNPRONOUNCEABLE: `<p><strong>Link text:</strong> <i>%(TEXT)</i></p><p>${why.fix}Add text or a title describing its destination, or delete it if it is just a typo or linked space character.</p><div class="why"><p>Tip: screen readers cannot describe links that only contain spaces or symbols. They either fall silent ("Link, [...awkward pause where the link title should be...]"), or read the name of the symbol.</p></div>`,
   LINK_FILE_EXT: `<p><strong>Link text:</strong> <i>%(TEXT)</i></p><p>This link points to a PDF or downloadable file (e.g. MP3, Zip, Word Doc) without warning.</p><p>${why.fix}Use text or an icon to <a href="https://itmaybejj.github.io/linkpurpose/">indicate the file type</a> within the link text.</p><p class="why">For large files, consider including the file size. For example: "Executive Report (PDF, 3MB)"</p>`,
@@ -8502,8 +10325,29 @@ const tips = {
   LINK_IMAGE_NO_ALT_TEXT: `<p>When a link is wrapped around an image, the image's alt text <a href="https://webaim.org/techniques/hypertext/link_text#alt_link">provides the link's title for screen readers</a>.</p><p>${why.fix}Use the title of the link destination as alt text for linked images.</p>${why.imageLinks}`,
   LINK_IMAGE_TEXT: "Image is marked as decorative, although the link is using the surrounding text as a descriptive label.",
   LINK_MAYBE_BUTTON: `<p><strong>Link:</strong> <i>%(TEXT)</i></p><p>This link has an invalid target, and has a name that suggests it might be working as a button or toggle instead of a link.</p><p>${why.fix}Use a <a href="https://www.w3.org/WAI/ARIA/apg/patterns/button/">&lt;button&gt;</a> instead, or correct the link's target.</p><div class="why"><p>Tip: Assistive technologies treat buttons and links differently. Using the correct HTML element ensures users know which keyboard shortcuts to use and what action will trigger.</p></div>`,
+  // Link checker results. The ruleset appends the link target after these.
+  HREF_BROKEN: "<p>The target page did not exist when last checked. Please confirm it is gone, then fix or remove this link:</p>",
+  HREF_UNPUBLISHED: "<p>Please publish the linked page or update this link:</p>",
+  HREF_MARKED_BROKEN: "<p>Please update this link if it is still broken:</p>",
+  HREF_ACCESS: "<p>This link points to content that anonymous visitors cannot see. Confirm that this is intentional:</p>",
+  HREF_UNVERIFIABLE: "<p>The link might be fine, but the server blocked the link checker. Please open the link and confirm it works:</p>",
+  HREF_REDIRECT: "<p>Please confirm the redirect is valid, and consider updating the link to the new address.</p><p><strong>Redirects to:</strong> %(redirectsTo)</p>",
+  HREF_SERVER_ERROR: "<p>The linked site returned an error or did not respond. Open the link and confirm it works:</p>",
+  HREF_BAD_HOST: "<p>The site name in this link is not valid. Look for a typo:</p>",
+  HREF_MALFORMED: "<p>The address may contain a space or a character that is not allowed in links:</p>",
+  HREF_SCHEME_TYPO: '<p>The start of this link (such as "https://" or "mailto:") is misspelled or incomplete, so browsers cannot open it:</p>',
+  HREF_MISSING_HTTPS: '<p>Without "https://" at the start, browsers treat this address as a page on this site, and no such page exists. Add "https://" to the start of this link:</p>',
+  HREF_MISSING_MAILTO: '<p>Add "mailto:" to the start of a link to an email address:</p>',
+  HREF_EMAIL_INVALID: '<p>The link starts with "mailto:", so clicking it will open an email program, but it is not followed by a valid email address. If this should open a web page, replace "mailto:" with "https://":</p>',
+  HREF_PHONE_INVALID: '<p>Phones can only dial digits, so this link will not place a call. After "tel:" in the link address, use only the number, such as tel:+1-555-010-0199. The visible link text can still spell a word:</p>',
+  HREF_LOCAL_FILE: "<p>The link points to a file on the computer where the page was written; the link will not work for other people. Upload the file to the site and link to it there:</p>",
+  HREF_PRIVATE: `<p>This link points to a private address, such as an intranet or a personal computer. Confirm that this is intentional, or link to a public address:</p>`,
+  HREF_USERINFO: `<p>Anyone who can view this page can read the username or password written into this link's address. Remove it from the link and, if it is a real password, change it. This link was not checked:</p>`,
+  HREF_FTP: '<p>Web browsers cannot open "ftp:" links. Check whether the file is also available at an "https://" address, or provide users with instructions for downloading file transfer software:</p>',
+  HREF_APP_LINK: "<p>This link opens another program, such as a calendar, meeting or music app, instead of a web page. Confirm it opens the right app, and that visitors without that app have another way to reach this content:</p>",
+  HREF_REDIRECT_APP: "<p>This link forwards visitors to an app or an email address instead of a web page. Confirm that this is intentional, or update the link.</p><p><strong>Redirects to:</strong> %(redirectsTo)</p>",
   LINK_NEW_TAB: `<p><strong>Link text:</strong> <i>%(TEXT)</i></p><p>${why.fix}Set this link to open in the same tab, or <a href="https://itmaybejj.github.io/linkpurpose/">warn users</a> first.</p><div class="why"><p>Readers can always <em>choose</em> to open a link in a new tab. When a link forces open a new tab, it is often confusing or annoying, especially for assistive device users who wonder why their browser's "back" button stopped working.</p><p>Note: forms are the exception. When the user is filling out a form, opening a link in the same window could cause them to lose their work, so links within forms usually open in new tabs.</p></div>`,
-  LINK_PLACEHOLDER_ALT: `<p><strong>Alt text:</strong> <i>%(alt)</i>.</p><p>${why.fix}Use the title of the link destination as alt text for linked images.</p>${why.imageLinks}`,
+  LINK_PLACEHOLDER_ALT: `<p><strong>Alt text:</strong> <i>%(alt)</i></p><p>${why.fix}Use the title of the link destination as alt text for linked images.</p>${why.imageLinks}`,
   LINK_STOPWORD: `<p>Link text: <i>%(ERROR)</i></p><p>${why.fix}Use link text that describes its destination.</p>${why.links}`,
   LINK_STOPWORD_ARIA: `<p>A different name was provided using ARIA:</p><p><strong>Visible text:</strong> <i>%(VISIBLE)</i></p><p><strong>Hidden text:</strong> <i>%(HIDDEN)</i></p><p>${why.fix}Write meaningful links for everyone, not just screen reader users, and make sure each element's <a href="https://www.w3.org/WAI/WCAG22/Understanding/label-in-name.html">visual label matches its name</a>, so that voice control users can tell their browser which link to click.</p>${why.links}`,
   LINK_SUS_ALT: `<p>Unless "<i>%(alt)</i>" describes the link's destination, this alt probably describes the image.</p><p><strong>Alt text:</strong> <i>%(ALT_TEXT)</i></p><p>${why.fix}Use the title of the link destination as alt text for linked images.</p>${why.imageLinks}`,
@@ -8513,6 +10357,7 @@ const tips = {
   META_LANG_VALID: `<p><strong>Element:</strong> <code>&lt;%(ELEMENT) lang="%(CODE)"&gt;</code></p><p>${why.fix}Replace the lang attribute with a valid language code.</p><div class="why"><p>Tip: pages and elements have <a href="https://www.w3.org/International/questions/qa-html-language-declarations">language attributes</a> so that screen readers and translation tools read the text correctly.</p></div>`,
   META_REFRESH: `<p>Pages should not automatically refresh using a meta tag. This interrupts the user without warning or the ability to prevent refresh, makes them lose their place while reading, and can reset form progress.</p><p>${why.fix}To refresh content on the same page, use AJAX to refresh sections in place without a reload, or use JavaScript to trigger the reload, so the user can be warned first and have the option to delay the event.</p>`,
   META_TITLE: `<p>${why.fix}Add a <code>&lt;title&gt;</code> tag to the page's <code>head</code> element.</p><div class="why"><p>Tip: many parts of the browsing experience depend on a <a href="https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/title">short and unique title tag</a>:</p><ul><li>Search engines use it to title results.</li><li>Browsers use it to title tabs.</li><li>Screen readers speak it when switching tabs.</li></ul><p>Without a page title, people see/hear a raw URL instead.</p></div>`,
+  META_TITLE_UNDESCRIPTIVE: `<p>The page title "<i>%(TEXT)</i>" may not be descriptive or uniquely convey the subject or purpose of this page.</p><p>${why.fix}Page titles are used by screen readers to title windows and search engines to title results. Write a page title that is unique, concise, and clearly describes the page content.</p>`,
   MISSING_ALT: `<p>When screen readers encounter an image with no alt attribute at all, they attempt to pronounce the url of the image file instead, often one letter at a time.</p>	<p>${why.fix}Concisely describe what this image means, in this context.</p>${why.images}`,
   MISSING_ALT_LINK: `<p>When screen readers encounter an image with no alt attribute at all, they attempt to pronounce the url of the image file instead, often one letter at a time. This is especially a problem for linked images.</p><p>${why.fix}Add alt text that matches the link's destination.</p>${why.imageLinks} `,
   MISSING_ALT_LINK_HAS_TEXT: `<p>This image is part of a link with text. If the visible text is sufficient to describe the link, add an empty alt (alt="") to tell screen readers to ignore this image. Otherwise, add an alt that helps describe the link's destination or purpose.</p>${why.imageLinks}`,
@@ -8521,7 +10366,7 @@ const tips = {
   QA_DOCUMENT: `<p><strong>Link:</strong> <i>%(TEXT)</i></p><p>Linked documents are considered web content and must be made accessible as well. Check that this document has tagged its headings, table headers and image alt text.</p><div class="why"><ul><li>Make your <a href="https://support.google.com/docs/answer/6199477?hl=en">Google Workspace document or presentation more accessible.</a></li><li>Make your <a href="https://support.microsoft.com/en-us/office/create-accessible-office-documents-868ecfcd-4f00-4224-b881-a65537a7c155">Office documents more accessible.</a></li></ul></div>`,
   QA_FAKE_HEADING: `<p><strong>Bold text:</strong> <i>%(TEXT)</i></p><p>${why.fix}If this text is bold to mark a topic change, tag it as a heading so that screen reader users can use it to navigate the page.</p><div class="why"> <p>Tip: bold and italic styles provide visual emphasis, but do not automatically add text to the document's table of contents for assistive technologies.</p></div>`,
   QA_FAKE_LIST: `<p>${why.fix}If this <i>%(TEXT)</i> is part of a list, replace it with list formatting.</p><div class="why"><p>Tip: list formatting is structural, both visually and navigationally:</p> <ol><li>Lists align their indents for easy reading.</li> <li>Lists are machine-readable. Screen readers orient their users by regularly announcing their position in the list ("item 3 of 7").</li></ol> <p>&nbsp;&nbsp;&nbsp;3. But a sentence with a number in front of it like this does not indent its second line on overflow, and is not included in the count of items for screen reader users.</p></div> `,
-  QA_IN_PAGE_LINK: `<p><strong>Link:</strong> <i>%(TEXT)</i></p><p><strong>URL:</strong> <code>#%(ID)</code></p><p>The link target does not match any elements on this page.</p><div class="why"><p>Note for developers: if this is not a normal link, and the link target is a placeholder for a JavaScript event, make sure to test that it works when clicked with a keyboard before adding this to the checker ignore list.</p></div>`,
+  QA_IN_PAGE_LINK: `<p><strong>URL:</strong> <i>#%(ID)</i></p><p><strong>Link:</strong> <code>%(TEXT)</code></p><p>The link target does not match any elements on this page.</p><div class="why"><p>Note for developers: if this is not a normal link, and the link target is a placeholder for a JavaScript event, make sure to test that it works when clicked with a keyboard before adding this to the checker ignore list.</p></div>`,
   QA_JUSTIFY: `<p>Justified text inserts extra spaces to align paragraphs to both the left and right margins. The irregular gaps from line to line make the text more difficult to read for many people.</p><p>${why.fix}Use left-aligned text.</p>`,
   QA_NESTED_COMPONENTS: "Avoid nesting interactive layout components, such as placing accordions within other accordions, or placing tabs inside accordions and vice versa. This can complicate navigation, increase cognitive overload, and lead to people overlooking content.",
   QA_PDF: `<p><strong>Link:</strong> <i>%(TEXT)</i></p><p>${why.fix}Do one of the following:</p><ul><li>Link to a Web page instead,</li><li><em>Also</em> link to a Web page or editable document, so this PDF is only the "printable" option, or</li><li>At a minimum make sure this PDF is readable with screen readers by <a href='https://webaim.org/techniques/acrobat/' target='_blank'>manually checking that it has been tagged</a> with headings, column reading order, table headers, and alt text.</li>	</ul>	<div class="why"><p>Tip: mobile and assistive device users almost universally prefer Web pages to PDFs. PDFs do not reflow for mobile devices, and are often missing tags that must be present to navigate their text with screen readers.</p></div>`,
@@ -8530,12 +10375,16 @@ const tips = {
   QA_SUBSCRIPT: `<p><strong>Text:</strong> <i>%(TEXT)</i></p><p>Subscript and superscript formatting makes text too small to be easily read for many people. It should only be used for individual words or phrases, such as ordinal numbers (4<sup>th</sup>), chemical formulas (H<sub>2</sub>O) and references to footnotes.</p>`,
   QA_UNDERLINE: `<p>Underlined text on the Web is used for links, not emphasis. Users will think they can click this: <i><u>%(TEXT)</u></i></p><p>${why.fix} Use <strong>bold</strong> or <em>italic</em> for emphasis, and headings for structure.</p><div class="why"><p>Note: screen readers do not announce visual-only formatting like underlines. Only headings add text to the page outline.</p></div>`,
   QA_UPPERCASE: `<p><strong>Text:</strong> <i>%(TEXT)</i></p><p>${why.fix}Only capitalize a few words for emphasis. LARGE BLOCKS OF UPPERCASE TEXT ARE MORE DIFFICULT TO READ, AND MANY READERS INTERPRET THEM AS SHOUTING.</p><div class="why"><p>Note: screen readers do not announce visual-only formatting like uppercase text. Use a heading style instead if this emphasized text introduces a topic change or critically important content.</p></div>`,
+  SUMMARY_EMPTY: `<p>Details elements create a clickable accordion, displaying the <code>&lt;summary&gt;</code> text as a button that reveals more details. Without summary text, people using screen readers cannot hear what the button does.</p>`,
   SUS_ALT: `<p>This image's alt text includes the word "<i>%(alt)</i>." Screen readers announce they are describing an image when reading alt text, so phrases like "image of" and "photo of" are usually redundant.</p><p><strong>Alt text:</strong> <i>%(ALT_TEXT)</i></p><p>${why.fix}Concisely describe what this image means, in this context.</p><div class="why"><p>Tip: these phrases are worth keeping if the format itself is meaningful:<br>"A photo of a cat, framed and hanging on the wall."</p></div>`,
+  SVG_NO_ACCESSIBLE_NAME: `<p>Some screen readers will announce this SVG as an unlabeled image because it lacks an accessible name and is not hidden. Add an accessible label (or <code>&lt;title&gt;</code>) if it conveys meaning, or hide it from screen readers if it's purely decorative (<code>aria-hidden="true"</code>).</p>`,
   TABINDEX_ATTR: `<p>Tabindex values greater than 0 move focusable elements out of their visual order, making it difficult for assistive device users to locate and operate them.</p><p>${why.fix}Change the order of elements in the HTML instead, so that focus order and reading order match.</p><div class="why"><p>Tip: the visual order of words on the page and the order keyboards tab through elements are usually the same.</p><p>Assigning a positive tabindex to an element moves it to the beginning of the tab order, <strong>but not the visual or reading order</strong>.</p></div>`,
   TABLES_EMPTY_HEADING: `<p>${why.fix}Make sure each header cell contains text.</p><div class="why"><p>Tip: screen readers use headers to orient users as they explore a table. The relevant header repeats as the cursor enters each column or row.</p></div>`,
   TABLES_INVALID_HEADERS_REF: `<p>This table is attempting to label a specific data cell with a specific header cell, but the header ID cannot be found: <code>%(VALUE)</code>.</p><p>${why.fix}Make sure each <code>headers</code> attribute matches the ID of a header cell in the same table.</p><div class="why">Tip: <a href="https://www.w3.org/WAI/WCAG22/Techniques/html/H43">using manual ID references</a> to associate data cells with header cells is complicated and fragile. When possible, break complex data into smaller tables with simple header rows and columns.</div>`,
   TABLES_MISSING_HEADINGS: `<p>${why.fix}Edit the table's properties and specify whether headers have been placed in the first row, column or both.</p><div class="why"> <p>Tip: screen readers use headers to orient users as they explore a table. The relevant header repeats as the cursor enters each column or row.</p><p>If this table has no headers because it is only being used for visual layout, remove the table formatting and use visual-only column formatting instead.</p></div> `,
-  TABLES_SEMANTIC_HEADING: `<p>${why.fix}Remove this heading (h2, h3) formatting. Provide header rows and columns instead. If you need multiple header rows, break this into more than one table.</p><div class="why"> <p>Tip: Table headers are directional: one row or column. Content headings label all subsequent text, even in unrelated columns:</p><table><tr><th>1</th><th>2</th><th>3</th><td rowspan="2">A <strong>table header</strong> in cell 2 labels cell B. <br><br> A <strong>content heading</strong> in cell 2 labels cells 3, A, B and C, as well as this text and this tooltip's footer.</td></tr> <tr><td>A</td><td>B</td><td>C</td></tr></table> </div>`
+  TABLES_SEMANTIC_HEADING: `<p>${why.fix}Remove this heading (h2, h3) formatting. Provide header rows and columns instead. If you need multiple header rows, break this into more than one table.</p><div class="why"> <p>Tip: Table headers are directional: one row or column. Content headings label all subsequent text, even in unrelated columns:</p><table><tr><th>1</th><th>2</th><th>3</th><td rowspan="2">A <strong>table header</strong> in cell 2 labels cell B. <br><br> A <strong>content heading</strong> in cell 2 labels cells 3, A, B and C, as well as this text and this tooltip's footer.</td></tr> <tr><td>A</td><td>B</td><td>C</td></tr></table> </div>`,
+  TABLES_SINGLE_COLUMN: `<p>Single-column tables are often used for visual design rather than tabular data. This is confusing for people using screen readers, who have to stop and listen to structural descriptions intended for data grids, for example <em>"table, 5 rows, 1 column"</em>.</p><p>${why.fix}Remove the table formatting and use a list or other visual-only layout element.</p>`,
+  TABLES_SINGLE_CELL: `<p>Single-cell tables are often copy and paste mistakes, or added for visual borders. This is confusing for people using screen readers, who have to stop and listen to structural descriptions intended for data grids: <em>"Table, 1 row, 1 column, Row 1 Column 1."</em></p><p>${why.fix}Remove the table formatting and use other styling options to bring attention to this content.</p>`
 };
 const interfaceStrings = {
   ALERT_CLOSE: "Close",
@@ -8550,6 +10399,7 @@ const interfaceStrings = {
   edit_term: "Edit term",
   edit_user: "Edit user",
   IMAGES: "Alt text",
+  LINKS: "Links",
   MAIN_TOGGLE_LABEL: "Toggle accessibility tools",
   MISSING: "(missing!)",
   NOT_VISIBLE: "Note: this content may not be visible. Look for it inside the outlined container.",
@@ -8558,6 +10408,8 @@ const interfaceStrings = {
   PANEL_DISMISS_BUTTON: `Show %(dismissCount) hidden alerts`,
   PANEL_HEADING: "Show visualizers",
   SKIP_TO_ISSUE: "Show alert",
+  buttonNext: "Next",
+  buttonPrev: "Previous",
   WARNING: "Manual check",
   WARNINGS: "manual checks",
   // Not in use?
@@ -8567,6 +10419,8 @@ const interfaceStrings = {
   buttonShowHiddenAlert: "Show hidden alert",
   buttonToolsActive: "Hide visualizers",
   dismissActions: `Similar`,
+  dismissBrokenButton: "Mark broken",
+  dismissBrokenTitle: "Reports this broken link to all editors",
   dismissHideTitle: "Only hides alert for you",
   dismissOkAllButton: "On this page: mark OK",
   dismissOkButtonContent: "Mark OK",
@@ -8579,6 +10433,34 @@ const interfaceStrings = {
   issueContent: "Content issue",
   issueDeveloper: "Developer issue",
   issueTemplate: "Template issue",
+  linkBrokenBadge: "Broken link",
+  linkManualBadge: "Check this link",
+  linkHiddenBadge: "Hidden link alert",
+  linkJumpTitle: "Jump to alert",
+  linkStatusBroken: "Broken",
+  linkStatusUnpublished: "Unpublished",
+  linkStatusMarkedBroken: "Marked broken",
+  linkStatusAccess: "Restricted",
+  linkStatusUnverifiable: "Unverified",
+  linkStatusRedirect: "Redirected",
+  linkStatusServerError: "Not responding",
+  linkReasonBadHost: "Bad site name",
+  linkReasonMalformed: "Malformed",
+  linkReasonSchemeTypo: "Typo",
+  linkReasonMissingHttps: "Missing https://",
+  linkReasonMissingMailto: "Missing mailto:",
+  linkReasonEmailInvalid: "Bad email",
+  linkReasonPhoneInvalid: "Bad phone number",
+  linkReasonLocalFile: "Local file",
+  linkReasonPrivate: "Private network",
+  linkReasonUserinfo: "Username or password",
+  linkReasonFtp: "FTP",
+  linkReasonAppLink: "Opens an app",
+  linkReasonRedirectApp: "Redirects to app",
+  linkDismissedOk: "Marked OK",
+  linkDismissedHide: "Ignored",
+  linksCheckThis: "URL to check:",
+  linkRedirectOriginal: "Original:",
   main_toggle_hide: "Hide accessibility tools",
   main_toggle_hide_alerts: "Hide accessibility alerts",
   main_toggle_show: "Show accessibility tools",
@@ -8589,8 +10471,10 @@ const interfaceStrings = {
   MISSING_ROOT: `Editoria11y did not find any elements that matched the check area configuration: <code>%(root)</code>`,
   panelCheckAltText: "Check that each image describes what it means in context, and that there are no images of text.",
   panelCheckOutline: "This shows the heading outline. Check that it matches how the content is organized visually.",
+  panelCheckLinks: "These links need a manual check. The target pages may be missing, redirected or blocking crawlers.",
   PANEL_HEADING_MISSING_ONE: "Missing Heading 1.",
   PANEL_NO_HEADINGS: "No headings found.",
+  PANEL_NO_LINKS: "No flagged links found on this page.",
   reportsLink: "Open site reports",
   toggleDisabled: "No content available for Editoria11y to check.",
   transferFocus: "Edit this content",
@@ -8599,10 +10483,7 @@ const interfaceStrings = {
   unDismissOKButton: "Restore this alert marked as OK"
 };
 const englishOverrides = {
-  // @todo: Outline error explanations currently hidden.
-  /*errorOutlinePrefixSkippedLevel: '(flagged for skipped level)',
-  errorOutlinePrefixHeadingEmpty: '(empty heading)',
-  errorOutlinePrefixHeadingIsLong: '(flagged for length)',*/
+  // This is for ruleset-only overrides.
   SUS_ALT_STOPWORDS: [
     "image",
     "graphic",
@@ -8644,16 +10525,27 @@ const englishOverrides = {
 };
 const lang = {
   strings: Object.assign(Sa11yStrings.strings, interfaceStrings, tips, englishOverrides),
-  testNames
+  testNames,
+  ruleset: Object.assign({}, Sa11yStrings.ruleset, englishOverrides)
 };
-const ed11yDefaultOptions = {
+const defaults = {
   // Default options.
   // Sa11y properties =======================
   // Target area to check
   checkRoot: false,
   // Editoria11y uses "checkRoots" below.
   fixedRoots: false,
-  // Array of specific nodes, overrides previous.
+  // Array of root elements to check, e.g. [editableEl].
+  framePositioners: false,
+  // Parallel array of wrapper elements outside each
+  // iframe; framePositioners[i] offsets annotations for fixedRoots[i]. Use
+  // false (or omit) when roots are in the main document.
+  alertAttachTo: false,
+  // Positioned element (or a selector for one) to
+  // append alert buttons and highlights to, instead of panelAttachTo. They
+  // are positioned relative to it, so they scroll and clip with it. Tips
+  // still attach to panelAttachTo. If it leaves the page, alerts fall back to
+  // panelAttachTo; pass a replacement to Ed11y.setAlertAttachTo().
   // Exclusions
   containerIgnore: "",
   contrastIgnore: ".sr-only",
@@ -8712,8 +10604,24 @@ const ed11yDefaultOptions = {
   contrastPlugin: false,
   contrastAlgorithm: "AA",
   // Other plugins
+  // Wait for external JS to insert results. Each external test listens for
+  // `ed11yRunCustomTests`, pushes objects shaped like
+  // { test, element, type, content, dismiss } onto Ed11y.State.results, then
+  // dispatches `ed11yResume`. Echo the run ID to have late answers ignored:
+  //   document.addEventListener('ed11yRunCustomTests', (e) => {
+  //     const runId = e.detail.runId;
+  //     // ...push results, then:
+  //     document.dispatchEvent(new CustomEvent('ed11yResume', { detail: { runId } }));
+  //   });
+  // An answer whose runId is not the current run's is ignored; an answer
+  // without one is counted for the current run. Tests that miss the 1000ms
+  // deadline are dropped. Besides 'error' and 'warning', external tests
+  // may push `type: 'link'` (broken link) or `type: 'linkManual'`
+  // (unverifiable link); see utils/result-types.js, or hand link checker
+  // results over through `brokenLinks` below instead. Any extra `data`
+  // object on the result is echoed back in `ed11yResults` and
+  // `ed11yDismissalUpdate`.
   customTests: 0,
-  // Wait for external JS to insert results.
   customRules: [],
   // Rulebuilder. Provide an array of objects:
   /**
@@ -8738,6 +10646,62 @@ const ed11yDefaultOptions = {
    *  }
    * ]
    */
+  // Link checker results. List links to flag. Setting any enables
+  // the Broken Links panel in the visualizer.
+  // Editor actions emit an `ed11yDismissalUpdate` event with
+  // a `hash`, `href` and `status` in `dismissData`. See
+  // rulesets/broken-links.js for the status table. Provide:
+  /**
+   * {
+   *  href         Required. The URL as the checker stored it.
+   *  status       Required. The problem: 'broken' | 'unpublished' |
+   *               'access' | 'unverifiable' | 'redirect' | 'serverError' |
+   *               'markedBroken'
+   *  reason       The checker's machine reason, e.g. 'invalid_email'. A
+   *               reason listed under the status in LINK_REASONS gets its
+   *               own title and tip; any other falls back to the status.
+   *  dismissed    The verdict, if any: 'ok' (an editor marked the link OK
+   *               site-wide) or 'hide' (this editor ignored the alert).
+   *  checkerStatus  With status 'markedBroken': the checker's own finding,
+   *               painted once the mark is lifted (Mark OK, or Restore by
+   *               an editor who may mark links). Any status but
+   *               'markedBroken', or 'unflagged' when the checker alone
+   *               would not flag the link. Without it, a lifted mark stays
+   *               painted until the page reloads.
+   *  redirectsTo  Where a 'redirect' link now lands.
+   *  hash         Opaque id echoed back in events. Defaults to the href.
+   * }
+   */
+  brokenLinks: [],
+  // Hosts whose links the checker stores as root-relative paths. The page's
+  // own host always counts.
+  brokenLinksInternalHosts: [],
+  // Path prefixes the checker strips from internal links before storing
+  // them, e.g. a subdirectory base path or a language prefix: ['/en'].
+  brokenLinksPathPrefixes: [],
+  // Query parameters that identify an internal link when the checker stores
+  // only some of them; an anchor is matched without the others, e.g. an image
+  // token: ['page']. Null keeps every parameter. External links are untouched.
+  brokenLinksPreserveParams: null,
+  // Query parameters the checker always drops from internal links, even with
+  // no preserve list, e.g. those a report adds to its links: ['ed1ref'].
+  brokenLinksStripParams: [],
+  // Where to look for the flagged links: a CSS selector for the containers
+  // the checker harvested, e.g. 'body' when it read menus and footers too.
+  // False paints only links inside the check roots. Container ignores
+  // (containerIgnore, ignoreElements) apply either way.
+  brokenLinksRoots: false,
+  // Which link checker manual checks ('access', 'unverifiable', 'redirect',
+  // 'serverError')
+  // are painted like any other manual check. Statuses removed from this list
+  // hide until the visualizer panel opens. A site with many links the checker
+  // cannot verify is overwhelming; this convert checking to a manual task:
+  //   brokenLinksShowChecks: ['redirect'],  // unverifiable and access hide
+  //   brokenLinksShowChecks: [],            // every manual check hides
+  brokenLinksShowChecks: ["access", "unverifiable", "redirect", "serverError"],
+  // Whether editors may Mark OK and Mark broken on flagged links. Null
+  // follows allowOK.
+  allowLinkMarks: null,
   linksAdvancedPlugin: true,
   formLabelsPlugin: true,
   embeddedContentPlugin: true,
@@ -8833,8 +10797,8 @@ const ed11yDefaultOptions = {
   checkVisible: true,
   // Selector list for elements where the tip opening JS should wait for your theme to modify the DOM or CSS before opening the tip.
   hiddenHandlers: "",
-  panelOffsetX: "25px",
-  panelOffsetY: "25px",
+  panelOffsetX: "min(25px, 2vw)",
+  panelOffsetY: "min(25px, 2vh)",
   panelNoCover: "",
   // select other buttons to avoid.
   panelAttachTo: document.body,
@@ -8924,12 +10888,14 @@ const ed11yDefaultOptions = {
   // get from language pack
   linksMeaningless: false,
   // get from language pack
-  // @todo cms/document wp this was a string.
+  // CMS text shown in place of an empty alt (e.g. WP's "This image has an
+  // empty alt attribute; its file name is %s"). String entries match the start
+  // of the alt; RegExp entries are used as authored, for templates whose
+  // variable part can come first. Bidi control characters are ignored.
   altPlaceholder: [],
-  // WP uses 'This image has an empty alt attribute; it's filename is etc.jpg'
   editLinks: false,
   // Add links to edit content in tooltips.
-  userPrefersShut: localStorage.getItem("editoria11yShow") === "0",
+  userPrefersShut: store.getItem("editoria11yShow") === "0",
   // Sa11y checks ==================
   checks: {
     // Sa11y: Heading checks
@@ -8946,6 +10912,8 @@ const ed11yDefaultOptions = {
       maxLength: 170
     },
     HEADING_MISSING_ONE: false,
+    HEADING_UNPRONOUNCEABLE: true,
+    // @todo
     // Sa11y: Image checks
     MISSING_ALT_LINK: true,
     MISSING_ALT_LINK_HAS_TEXT: true,
@@ -8992,6 +10960,7 @@ const ed11yDefaultOptions = {
     },
     ALT_MAYBE_BAD_WARNING: true,
     LINK_ALT_MAYBE_BAD_WARNING: true,
+    SVG_NO_ACCESSIBLE_NAME: true,
     // Sa11y: Link checks
     DUPLICATE_TITLE: false,
     // Todo pro.
@@ -9008,7 +10977,7 @@ const ed11yDefaultOptions = {
     LINK_DOI: true,
     // Todo consider.
     LINK_URL: {
-      maxLength: 40
+      maxLength: 20
     },
     LINK_LABEL: {
       dismissAll: true
@@ -9016,11 +10985,8 @@ const ed11yDefaultOptions = {
     LINK_EMPTY: true,
     LINK_IDENTICAL_NAME: false,
     // Todo pro.
-    LINK_NEW_TAB: {
-      dismissAll: true
-    },
-    LINK_FILE_EXT: false,
-    // Todo test vs LinkPurpose.
+    LINK_NEW_TAB: true,
+    LINK_FILE_EXT: true,
     LINK_UNPRONOUNCEABLE: true,
     LINK_MAYBE_BUTTON: true,
     // Form label checks module not yet enabled.
@@ -9043,14 +11009,13 @@ const ed11yDefaultOptions = {
       sources: ""
     },
     EMBED_UNFOCUSABLE: true,
-    EMBED_MISSING_TITLE: {
-      type: "warning"
-    },
     EMBED_GENERAL: true,
+    EMBED_MISSING_TITLE: true,
     // Quality assurance checks
     QA_BAD_LINK: {
       sources: ""
     },
+    // useless without sources.
     QA_STRONG_ITALICS: true,
     QA_IN_PAGE_LINK: true,
     QA_DOCUMENT: false,
@@ -9060,10 +11025,6 @@ const ed11yDefaultOptions = {
       dismissAll: true
     },
     QA_BLOCKQUOTE: true,
-    TABLES_MISSING_HEADINGS: true,
-    TABLES_SEMANTIC_HEADING: true,
-    TABLES_EMPTY_HEADING: true,
-    TABLES_INVALID_HEADERS_REF: true,
     QA_FAKE_HEADING: true,
     QA_FAKE_LIST: true,
     QA_UPPERCASE: true,
@@ -9075,6 +11036,13 @@ const ed11yDefaultOptions = {
     // Todo pro.
     QA_SMALL_TEXT: false,
     // Todo pro.
+    SUMMARY_EMPTY: true,
+    TABLES_MISSING_HEADINGS: true,
+    TABLES_SEMANTIC_HEADING: true,
+    TABLES_EMPTY_HEADING: true,
+    TABLES_INVALID_HEADERS_REF: true,
+    TABLES_SINGLE_COLUMN: true,
+    TABLES_SINGLE_CELL: true,
     // Sa11y: Meta checks
     META_LANG: false,
     // Todo pro.
@@ -9084,15 +11052,15 @@ const ed11yDefaultOptions = {
     // Not interested.
     META_REFRESH: false,
     // Todo pro.
-    META_LANG_VALID: true,
-    META_LANG_SUGGEST: true,
-    PAGE_LANG_CONFIDENCE: true,
+    META_LANG_VALID: false,
+    META_LANG_SUGGEST: false,
+    META_TITLE_UNDESCRIPTIVE: false,
+    PAGE_LANG_CONFIDENCE: false,
     // Sa11y: Language checks
     LANG_OF_PARTS: true,
     LANG_MISMATCH: true,
     LANG_OF_PARTS_ALT: true,
     // Sa11y: Developer checks
-    // Todo pro.
     DUPLICATE_ID: false,
     META_TITLE: false,
     UNCONTAINED_LI: false,
@@ -9102,6 +11070,9 @@ const ed11yDefaultOptions = {
     BTN_EMPTY: false,
     BTN_EMPTY_LABELLEDBY: false,
     BTN_ROLE_IN_NAME: false,
+    BTN_UNPRONOUNCEABLE: true,
+    // @todo
+    EMBED_VIDEO_AUTOPLAY: true,
     // Sa11y: Contrast checks
     // Todo pro.
     CONTRAST_WARNING: false,
@@ -9120,6 +11091,152 @@ const ed11yDefaultOptions = {
     // EMBED_CUSTOM: { sources: '#embed', },
   }
 };
+const CSS_REFERENCES = /\/\*[\s\S]*?\*\/|"(?:[^"\\\n]|\\[\s\S])*"|'(?:[^'\\\n]|\\[\s\S])*'|\burl\(\s*(?:"((?:[^"\\\n]|\\[\s\S])*)"|'((?:[^'\\\n]|\\[\s\S])*)'|([^\s"'()]*))\s*\)|(@import\b)|(\bimage-set\()/gi;
+const ABSOLUTE_REFERENCE = /^(?:[a-z][a-z\d+.-]*:|\/\/|#)/i;
+class UnshareableCssError extends Error {
+}
+class SharedStyles {
+  /**
+   * @param {string[]} urls Stylesheet URLs, already cache-busted.
+   */
+  constructor(urls) {
+    this.urls = urls;
+    this.linkBundle = SharedStyles.buildLinkBundle(urls);
+    this.sheets = [];
+    this.pendingRoots = /* @__PURE__ */ new Set();
+    this.mode = SharedStyles.supported() ? "adopt" : "link";
+    if (this.mode === "adopt") {
+      this.sheets = urls.map(() => new CSSStyleSheet());
+      this.ready = this.load();
+    } else {
+      this.ready = Promise.resolve();
+    }
+  }
+  static supported() {
+    return typeof CSSStyleSheet !== "undefined" && "replace" in CSSStyleSheet.prototype && "adoptedStyleSheets" in Document.prototype && "adoptedStyleSheets" in ShadowRoot.prototype;
+  }
+  static absolute(url2) {
+    return new URL(url2, document.baseURI).href;
+  }
+  /**
+   * Rewrites relative url()s in a stylesheet to absolute URLs.
+   *
+   * @param {string} css Stylesheet text.
+   * @param {string} sheetUrl Absolute URL the text was fetched from.
+   * @returns {string}
+   * @throws {UnshareableCssError} If the CSS needs <link> loading to work.
+   */
+  static absolutizeUrls(css, sheetUrl) {
+    return css.replace(CSS_REFERENCES, (token, double, single, bare, atImport, imageSet) => {
+      if (atImport) {
+        throw new UnshareableCssError(`@import in ${sheetUrl}`);
+      }
+      if (imageSet) {
+        throw new UnshareableCssError(`image-set() in ${sheetUrl}`);
+      }
+      const ref = double ?? single ?? bare;
+      if (ref === void 0 || ref === "" || ABSOLUTE_REFERENCE.test(ref)) {
+        return token;
+      }
+      if (ref.includes("\\")) {
+        throw new UnshareableCssError(`escaped url() in ${sheetUrl}`);
+      }
+      return `url("${new URL(ref, sheetUrl).href}")`;
+    });
+  }
+  static buildLinkBundle(urls) {
+    const bundle = document.createElement("div");
+    bundle.classList.add("ed11y-style");
+    bundle.setAttribute("hidden", "");
+    urls.forEach((url2) => {
+      const link = document.createElement("link");
+      link.setAttribute("rel", "stylesheet");
+      link.setAttribute("media", "all");
+      link.setAttribute("href", url2);
+      bundle.append(link);
+    });
+    return bundle;
+  }
+  async load() {
+    try {
+      const texts = await Promise.all(
+        this.urls.map(async (url2) => {
+          const response = await fetch(url2, { headers: { Accept: "text/css,*/*;q=0.1" } });
+          if (!response.ok) {
+            throw new Error(`${response.status} ${response.statusText} for ${url2}`);
+          }
+          const type = response.headers.get("Content-Type");
+          if (type && type.split(";")[0].trim().toLowerCase() !== "text/css") {
+            throw new UnshareableCssError(`${url2} was served as ${type}, not text/css`);
+          }
+          return response.text();
+        })
+      );
+      const rewritten = texts.map(
+        (text, i) => SharedStyles.absolutizeUrls(text, SharedStyles.absolute(this.urls[i]))
+      );
+      await Promise.all(rewritten.map((text, i) => this.sheets[i].replace(text)));
+    } catch (error) {
+      console.warn("Editoria11y: could not share stylesheets; falling back to <link>.", error);
+      this.mode = "link";
+      this.pendingRoots.forEach((root) => {
+        root.adoptedStyleSheets = root.adoptedStyleSheets.filter((s) => !this.sheets.includes(s));
+        this.appendLinks(SharedStyles.linkTarget(root));
+      });
+      this.sheets = [];
+    } finally {
+      this.pendingRoots.clear();
+      this.pendingRoots = null;
+    }
+  }
+  /**
+   * Resolves what to style: a Document or ShadowRoot as given, otherwise the
+   * root node an element is connected to. Detached elements return null.
+   *
+   * @param {Node} target
+   * @returns {Document|ShadowRoot|null}
+   */
+  static resolveRoot(target) {
+    if (target instanceof Document || target instanceof ShadowRoot) {
+      return target;
+    }
+    const root = target?.getRootNode?.();
+    return root instanceof Document || root instanceof ShadowRoot ? root : null;
+  }
+  /** A document cannot take a second child element, so its links go in <head>. */
+  static linkTarget(root) {
+    return root instanceof Document ? root.head || root.body : root;
+  }
+  appendLinks(target) {
+    for (const child of target.children) {
+      if (child.classList.contains("ed11y-style")) {
+        return;
+      }
+    }
+    target.appendChild(this.linkBundle.cloneNode(true));
+  }
+  /**
+   * Styles a document, a shadow root, or the root an element is connected to.
+   * Safe to call repeatedly on the same target.
+   *
+   * @param {Document|ShadowRoot|Element} target
+   */
+  attach(target) {
+    if (!target) {
+      return;
+    }
+    const root = SharedStyles.resolveRoot(target);
+    if (this.mode === "link" || !root) {
+      this.appendLinks(root ? SharedStyles.linkTarget(root) : target);
+      return;
+    }
+    const missing = this.sheets.filter((sheet) => !root.adoptedStyleSheets.includes(sheet));
+    if (missing.length) {
+      root.adoptedStyleSheets = [...root.adoptedStyleSheets, ...missing];
+    }
+    this.pendingRoots?.add(root);
+  }
+}
 const validateSelectorOptions = (userOptions) => {
   const selectorKeys = [
     "checkRoot",
@@ -9151,9 +11268,9 @@ const validateSelectorOptions = (userOptions) => {
 };
 const preProcessOptions = async (userOptions) => {
   validateSelectorOptions(userOptions);
-  smush(State.option, ed11yDefaultOptions, ["checks"]);
+  smush(State.option, defaults, ["checks"]);
   smush(State.option, userOptions, ["checks"]);
-  Object.assign(State.option.checks, ed11yDefaultOptions.checks, userOptions.checks);
+  Object.assign(State.option.checks, defaults.checks, userOptions.checks);
   if (!userOptions.lang) {
     State.option.lang = lang;
   }
@@ -9172,23 +11289,10 @@ const preProcessOptions = async (userOptions) => {
       console.warn("Editoria11y CSS file parameter is missing; attempting to load from CDN.");
     }
   }
-  const cssBundle = document.createElement("div");
-  cssBundle.classList.add("ed11y-style");
-  cssBundle.setAttribute("hidden", "");
-  cssUrls?.forEach((sheet) => {
-    const cssLink = document.createElement("link");
-    cssLink.setAttribute("rel", "stylesheet");
-    cssLink.setAttribute("media", "all");
-    if (sheet.indexOf("?") < 0) {
-      sheet = `${sheet}?ver=${UI.version}`;
-    }
-    cssLink.setAttribute("href", sheet);
-    cssBundle.append(cssLink);
-  });
-  UI.attachCSS = (appendTo) => {
-    const link = cssBundle.cloneNode(true);
-    appendTo.appendChild(link);
-  };
+  const sharedStyles = new SharedStyles(
+    (cssUrls ?? []).map((sheet) => sheet.indexOf("?") < 0 ? `${sheet}?ver=${UI.version}` : sheet)
+  );
+  UI.attachCSS = (target) => sharedStyles.attach(target);
   Lang.testNames = State.option.lang.testNames;
   const titles = Object.entries(Lang.testNames);
   for (let i = 0; i < titles.length; i++) {
@@ -9197,6 +11301,7 @@ const preProcessOptions = async (userOptions) => {
   if (State.option.customRules) {
     prepareCustomRuleset();
   }
+  prepareBrokenLinks();
   UI.english = Lang.langStrings.LANG_CODE.startsWith("en");
   if (UI.english) {
     State.option.extraPlaceholderStopWords = userOptions.extraPlaceholderStopWords ? `${userOptions.extraPlaceholderStopWords}, ${Lang.langStrings.extraPlaceholderStopWords}` : Lang.langStrings.extraPlaceholderStopWords;
@@ -9229,18 +11334,7 @@ const preProcessOptions = async (userOptions) => {
   UI.showDismissed = State.option.showDismissed;
 };
 const postProcessOptions = (userOptions) => {
-  Constants.Exclusions.Sa11yElements = [".ed11y-element", "ed11y-element-heading-label"];
-  Constants.Exclusions.Container = ["style", "script", "noscript"];
-  if (State.option.containerIgnore) {
-    const containerSelectors = State.option.containerIgnore.split(",").map((item) => item.trim());
-    Constants.Exclusions.Container = Constants.Exclusions.Container.concat(
-      containerSelectors.flatMap((item) => [`${item} *`, item])
-    );
-  }
-  if (userOptions.ignoreElements) {
-    const elementSelectors = userOptions.ignoreElements.split(",").map((item) => item.trim());
-    Constants.Exclusions.Container = Constants.Exclusions.Container.concat(elementSelectors);
-  }
+  rebuildExclusions();
   Constants.Panel.readabilityInfo = document.createElement("div");
   Constants.Panel.readabilityDetails = document.createElement("div");
   Object.assign(UI.theme, State.option[State.option.theme]);
@@ -9256,7 +11350,7 @@ const postProcessOptions = (userOptions) => {
   const localResultCount = store.getItem("editoria11yResultCount");
   UI.seen = localResultCount && localResultCount !== "undefined" ? JSON.parse(localResultCount) : {};
   if (State.option.syncedDismissals === false) {
-    UI.dismissedAlerts = localStorage.getItem("ed11ydismissed");
+    UI.dismissedAlerts = store.getItem("ed11ydismissed");
     UI.dismissedAlerts = UI.dismissedAlerts ? JSON.parse(UI.dismissedAlerts) : {};
   } else {
     UI.dismissedAlerts = {};
@@ -9272,7 +11366,6 @@ async function initialize(userOptions) {
   await preProcessOptions(userOptions).then();
   Constants.initializeGlobal();
   Constants.initializeReadability();
-  Constants.initializeExclusions();
   postProcessOptions(userOptions);
   customElements.define("ed11y-element-alt", Ed11yElementAlt);
   customElements.define("ed11y-element-result", Ed11yElementResult);
@@ -9284,32 +11377,19 @@ async function initialize(userOptions) {
       UI.disabled = true;
       return false;
     }
+    State.option.alertAttachTo = resolveAlertAttachTo(State.option.alertAttachTo);
     UI.running = true;
-    document.addEventListener("ed11yResume", () => {
-      UI.customTestsRemaining--;
-      if (UI.testsRemaining === 0 && UI.customTestsRemaining === 0) {
-        continueCheck().then();
-      }
-    });
+    document.addEventListener("ed11yResume", onCustomTestResume);
     checkAll();
-    window.addEventListener(
-      "keydown",
-      () => {
-        UI.interaction = true;
-      },
-      {
-        passive: true
-      }
-    );
-    window.addEventListener(
-      "click",
-      () => {
-        UI.interaction = true;
-      },
-      {
-        passive: true
-      }
-    );
+    attachIntegrationListeners(document);
+    if (Array.isArray(State.option.fixedRoots)) {
+      State.option.fixedRoots.forEach((root) => {
+        const foreignDoc = root?.ownerDocument;
+        if (foreignDoc && foreignDoc !== document) {
+          attachIntegrationListeners(foreignDoc);
+        }
+      });
+    }
     window.addEventListener(
       "resize",
       () => {
@@ -9338,12 +11418,15 @@ async function initialize(userOptions) {
 class Ed11y {
   constructor(userOptions) {
     if (CSS.supports("selector(:has(body))")) {
+      customElements.define("sa11y-console-error", ConsoleErrors);
       initialize(userOptions).catch((error) => {
-        customElements.define("ed11y-console-error", ConsoleErrors);
+        console.error("Editoria11y init failed:", error);
         const consoleErrors = new ConsoleErrors(error);
-        document.body.appendChild(consoleErrors);
-        UI.attachCSS(consoleErrors.shadowRoot.querySelector("*"));
-        throw Error(error);
+        document?.querySelector("*").appendChild(consoleErrors);
+        if (consoleErrors?.shadowRoot) {
+          UI.attachCSS(consoleErrors.shadowRoot);
+        }
+        throw error;
       });
     }
   }
@@ -9354,14 +11437,19 @@ export {
   Lang,
   State,
   UI,
+  UrlNormalizer,
   computeAccessibleName,
   createDismissalKey,
   elements,
   findElements,
   getElements,
+  realign,
   refresh,
   reset,
   sanitizeHTML,
+  setAlertAttachTo,
+  setFixedRoots,
   sprite,
   version
 };
+//# sourceMappingURL=ed11y.esm.js.map
