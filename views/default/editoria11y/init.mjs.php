@@ -11,6 +11,7 @@ foreach ($translator->getAllowedLanguages() as $code) {
 $supported_languages .= ']';
 
 ?>
+import 'jquery';
 import elgg from 'elgg';
 import * as Ed11y from './js/ed11y.esm.min.js';
 
@@ -23,10 +24,24 @@ if (supported_languages.includes(current_language)) {
 }
 
 import(language_module).then((lang) => {
-	const ed11y = new Ed11y.Ed11y({
-		lang: lang.lang,
-		cssUrls: [elgg.get_simplecache_url('editoria11y/css/editoria11y.min.css')],
-		checkRoot: '.editoria11y-editor',
-		ignoreContentOutsideRoots: true
-	});
+	// we need to wait for CKEditor to init
+	setTimeout(function() {
+		const ed11y = new Ed11y.Ed11y({
+			lang: lang.lang,
+			cssUrls: [elgg.get_simplecache_url('editoria11y/css/editoria11y.min.css')],
+			checkRoot: '.editoria11y-editor',
+			containerIgnore: '.hidden', // for tabs support
+			ignoreContentOutsideRoots: true
+		});
+		
+		// Core tab switch
+		$(document).on('open', '.elgg-components-tabs > li', function() {
+			Ed11y.refresh();
+		});
+		
+		// MMenu open/close menu
+		$(document).on('mmenu.toggle', function() {
+			Ed11y.realign();
+		});
+	}, 3000);
 });

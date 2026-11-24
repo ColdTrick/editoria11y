@@ -20,7 +20,7 @@ class Views {
 		}
 		
 		$vars = $event->getValue();
-		if (elgg_extract('input_type', $vars) !== 'longtext') {
+		if (elgg_extract('input_type', $vars) !== 'longtext' || !elgg_extract('editor', $vars, true)) {
 			return null;
 		}
 		
