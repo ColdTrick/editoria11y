@@ -21,8 +21,13 @@ return [
 	],
 	'views' => [
 		'default' => [
-			'editoria11y/css/' => __DIR__ . '/vendors/itmaybejj/editoria11y/dist/css/',
+			'editoria11y/css/editoria11y.css' => __DIR__ . '/vendors/itmaybejj/editoria11y/dist/css/editoria11y.css',
 			'editoria11y/js/' => __DIR__ . '/vendors/itmaybejj/editoria11y/dist/js/',
+		],
+	],
+	'view_extensions' => [
+		'editoria11y/css/editoria11y.css' => [
+			'editoria11y/site.css' => [],
 		],
 	],
 	'view_options' => [

@@ -1,0 +1,14 @@
+.ed11y-panel-wrapper .content summary {
+	background-color: var(--elgg-background-color-highlight);
+}
+
+.ed11y-buttonbar > button,
+.ed11y-buttonbar > a,
+.ed11y-pass .ed11y-toggle-circle {
+	background: var(--elgg-background-color-highlight);
+}
+
+.ed11y-panel-wrapper .content {
+	background: var(--elgg-background-color-soft);
+	color: var(--elgg-text-color-strong);
+}

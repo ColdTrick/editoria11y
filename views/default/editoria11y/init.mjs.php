@@ -28,7 +28,7 @@ import(language_module).then((lang) => {
 	setTimeout(function() {
 		const ed11y = new Ed11y.Ed11y({
 			lang: lang.lang,
-			cssUrls: [elgg.get_simplecache_url('editoria11y/css/editoria11y.min.css')],
+			cssUrls: [elgg.get_simplecache_url('editoria11y/css/editoria11y.css')],
 			checkRoot: '.editoria11y-editor',
 			containerIgnore: '.hidden', // for tabs support
 			ignoreContentOutsideRoots: true
