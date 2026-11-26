@@ -15,6 +15,10 @@ import 'jquery';
 import elgg from 'elgg';
 import * as Ed11y from './js/ed11y.esm.min.js';
 
+if (!window.isSecureContext) {
+	throw new Error('Unable to start Editoria11y because your browser is not in a secure context (HTTPS).');
+}
+
 <?= "const supported_languages = {$supported_languages};"; ?>
 
 const current_language = elgg.config.current_language || 'en';
